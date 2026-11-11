@@ -44,11 +44,33 @@ Built for [Foedrum](https://github.com/EdwinBekaert/foedrum), whose planner has 
 
 ## Results
 
+### M1: which folders an issue touches
+
 | Search | Hit@1 | Recall@3 | Recall@5 |
 |---|---|---|---|
 | no search: the busiest folders | 76.0% | 70.1% | 83.4% |
 | BM25 over file paths | 84.0% | 72.6% | 87.9% |
 | BM25 over paths, exports, comments | 89.0% | 82.6% | 94.6% |
+
+### M2: finding a question's sources among Foedrum's passages
+
+The 42 answerable questions of [eval/questions.jsonc](eval/questions.jsonc) (97 sources) against 3,561 passages of Foedrum at `2d64a6e3`, run on 2026-11-11.
+
+| Search | Recall@5 | All@5 | Recall@30 | MRR@30 |
+|---|---|---|---|---|
+| BM25 over passage text | 20.2% | 9.5% | 43.3% | 0.26 |
+| BM25 over breadcrumb title and text | 27.0% | 19.0% | 49.4% | 0.30 |
+| the same, each ADR followed by the ADRs that later changed it | 23.8% | 16.7% | 28.2% | 0.25 |
+
+Recall@k: the share of a question's sources with a passage in the top k (the answer is to be built from the top 5; a reranker would reorder the top 30).
+All@5: every source of the question in the top 5.
+MRR@30: one over the rank of the first source found.
+
+What the numbers say:
+
+- Keyword search alone finds a quarter of the sources an answer needs. It finds 46.5% for questions that share words with their source, and 10.9% for the 23 worded with few of them.
+- Following the links between ADRs made it worse: an ADR in the results brings every ADR that later changed it, and those push the other sources down (design-01's source falls from rank 4 to 261). For the 10 amended questions it changed nothing at 5, since the older ADR is rarely in the top 5 to begin with.
+- The questions were written from their sources, so the literal ones favour keyword search; the paraphrased split shows how much.
 
 ## Run
 
@@ -62,6 +84,10 @@ npm run demo                 # offline, from demo/snapshot/
 # Rebuild the evaluation (needs git and a logged-in gh)
 npm run eval:prepare -- --repo ../foedrum --github EdwinBekaert/foedrum
 npm run eval
+
+# Search Foedrum's documents for the question set's sources
+npm run chunk -- --repo ../foedrum --rev 2d64a6e3904c8f514efa135237035c45ae42a57a
+npm run eval:docs
 
 # Use it in Claude Code
 npm run index -- --repo ../foedrum --name EdwinBekaert/foedrum --rev origin/main
