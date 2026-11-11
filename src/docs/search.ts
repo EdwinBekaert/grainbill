@@ -59,6 +59,29 @@ export function withLaterAdrs(
   return out;
 }
 
+// The constant of reciprocal rank fusion: 60, as Cormack, Clarke and Büttcher (2009) set it, not
+// tuned here, since the question set is the only test there is.
+export const RRF_K = 60;
+
+// Reciprocal rank fusion: a passage scores the sum of 1 / (k + its rank) over the lists that hold
+// it, so one ranked high by either search, or fairly high by both, comes first. Ties by id.
+export function fuse(lists: Passage[][], k = RRF_K): Passage[] {
+  const scores = new Map<string, { p: Passage; s: number }>();
+  for (const list of lists) {
+    list.forEach((p, i) => {
+      const e = scores.get(p.id) ?? { p, s: 0 };
+      e.s += 1 / (k + i + 1);
+      scores.set(p.id, e);
+    });
+  }
+  return [...scores.values()].sort((a, b) => b.s - a.s || (a.p.id < b.p.id ? -1 : 1)).map((e) => e.p);
+}
+
+export const createHybridSearch =
+  (searches: Search[]): Search =>
+  (question) =>
+    fuse(searches.map((s) => s(question)));
+
 // What a passage is embedded as: its breadcrumb title and its text, as BM25 searches them.
 export const embeddingText = (p: Passage): string => `${p.title}\n${p.text}`;
 
