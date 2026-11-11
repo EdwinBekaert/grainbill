@@ -4,7 +4,7 @@ import { adrGraph } from '../src/docs/adr-links.ts';
 import type { Question } from '../src/docs/build.ts';
 import type { Passage } from '../src/docs/chunk.ts';
 import { all, reciprocal, recall, sourceRanks } from '../src/docs/evaluate.ts';
-import { createSearch } from '../src/docs/search.ts';
+import { createSearch, fuse } from '../src/docs/search.ts';
 
 const passage = (path: string, start: number, end: number, title: string, text: string, adr?: string): Passage => ({
   id: `${path}:${start}-${end}`,
@@ -72,4 +72,21 @@ test('sourceRanks finds each source by the passages its lines overlap, and the m
   assert.equal(all([1, 3], 3), 1);
   assert.equal(reciprocal(ranks), 0.5);
   assert.equal(reciprocal([31]), 0);
+});
+
+test('fuse ranks by the sum of 1 / (k + rank) over the lists, ties by id', () => {
+  const [a, b, c, d] = passages as [Passage, Passage, Passage, Passage];
+  // b: 2/62, c: 2/63, a and d: 1/61 each, tied, so by id (docs/adr/… before docs/design/…).
+  assert.deepEqual(
+    fuse([
+      [a, b, c],
+      [d, b, c],
+    ]).map((p) => p.id),
+    [b.id, c.id, d.id, a.id],
+  );
+  // With k = 0: b 1/2 + 1, a 1 + 1/3, c 1, d 1/2.
+  assert.deepEqual(
+    fuse([[a, b], [b], [c, d, a]], 0).map((p) => p.id),
+    [b.id, a.id, c.id, d.id],
+  );
 });

@@ -11,7 +11,7 @@ M1 (done) is BM25 keyword search over code with an evaluation on real pull reque
 - `npm run demo [-- --no-pause]`: the offline walk-through from `demo/snapshot/`
 - `npm run eval:prepare -- --repo ../foedrum --github EdwinBekaert/foedrum`, then `npm run eval`: rebuild and score the evaluation (needs git and gh)
 - `npm run chunk -- --repo ../foedrum --rev origin/main`: cut Foedrum's documents into passages (`data/passages.json`) and report how the question set's citations fall on them, and the links between ADRs
-- `npm run eval:docs [-- --embed]`: score each search of the passages on the question set's sources; embeddings come from `data/embeddings.json`, and only `--embed` sends what is not cached to Voyage (`VOYAGE_API_KEY`, costs money past the free allowance: ask first)
+- `npm run eval:docs [-- --embed] [--rerank]`: score each search of the passages on the question set's sources; embeddings and rerankings come from `data/embeddings.json` and `data/reranks.json`, and only `--embed` or `--rerank` sends what is not cached to Voyage (`VOYAGE_API_KEY`, costs money past the free allowance: ask first)
 - `npm run index -- --repo ../foedrum --name EdwinBekaert/foedrum --rev origin/main`: an index of current code for the MCP server
 - Run `npm test` and `npm run typecheck` before every commit.
 

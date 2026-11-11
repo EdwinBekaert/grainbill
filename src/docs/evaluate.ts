@@ -1,8 +1,10 @@
 // node src/docs/evaluate.ts [--passages data/passages.json] [--questions eval/questions.jsonc]
 //                           [--cache data/embeddings.json] [--embed]
+//                           [--rerank-cache data/reranks.json] [--rerank]
 //
-// Embeddings come from the cache; only with --embed does it send what is not cached to Voyage
-// (VOYAGE_API_KEY), and without it a run says what it would send and leaves the row out.
+// Embeddings and rerankings come from their caches; only with --embed or --rerank does it send
+// what is not cached to Voyage (VOYAGE_API_KEY), and without them a run says what it would send
+// and leaves those rows out.
 //
 // How well each search finds the question set's sources among the passages `npm run chunk` wrote.
 // A source is found when a passage it overlaps is in the top k: the answer is built from the top 5,
@@ -15,7 +17,8 @@ import { type AdrGraph, adrGraph } from './adr-links.ts';
 import { adrStatuses, type Corpus, passagesOf, type Question, readQuestions } from './build.ts';
 import type { Passage } from './chunk.ts';
 import { EmbeddingCache, embedAll, MODEL, uncached } from './embed.ts';
-import { createDenseSearch, createSearch, embeddingText, type Search, VARIANTS } from './search.ts';
+import { RERANK_MODEL, RerankCache, rerank } from './rerank.ts';
+import { createDenseSearch, createHybridSearch, createSearch, embeddingText, type Search, VARIANTS } from './search.ts';
 import { mean } from '../eval/metrics.ts';
 
 export const POOL = 30;
@@ -49,13 +52,42 @@ export function answerable(questions: Question[]): Question[] {
   return questions.filter((q) => q.sources.length > 0);
 }
 
-export function evaluateSearch(passages: Passage[], questions: Question[], graph: AdrGraph, dense?: Dense): Row[] {
-  const row = (name: string, search: Search): Row => ({
-    name,
-    cases: answerable(questions).map((q) => ({ question: q, ranks: sourceRanks(passages, q, search(q.question)) })),
-  });
-  const rows = VARIANTS.map((variant) => row(`BM25 over ${variant}`, createSearch(passages, variant, graph)));
-  if (dense) rows.push(row(`${dense.model} over title and text`, createDenseSearch(passages, dense.vectors, dense.queries)));
+// Reorders a question's pool, best first.
+export type Reranker = { model: string; rerank: (question: string, pool: Passage[]) => Promise<Passage[]> };
+
+export async function evaluateSearch(
+  passages: Passage[],
+  questions: Question[],
+  graph: AdrGraph,
+  dense?: Dense,
+  reranker?: Reranker,
+): Promise<Row[]> {
+  const asked = answerable(questions);
+  const row = async (name: string, search: (question: string) => Passage[] | Promise<Passage[]>): Promise<Row> => {
+    const cases: Ranks[] = [];
+    for (const q of asked) cases.push({ question: q, ranks: sourceRanks(passages, q, await search(q.question)) });
+    return { name, cases };
+  };
+  const rows: Row[] = [];
+  for (const variant of VARIANTS) rows.push(await row(`BM25 over ${variant}`, createSearch(passages, variant, graph)));
+  if (!dense) return rows;
+  const embedded = createDenseSearch(passages, dense.vectors, dense.queries);
+  const fused = createHybridSearch([createSearch(passages, 'title and text'), embedded]);
+  const firsts: [string, Search][] = [
+    [`${dense.model} over title and text`, embedded],
+    ['both, by reciprocal rank fusion', fused],
+  ];
+  for (const [name, search] of firsts) rows.push(await row(name, search));
+  if (!reranker) return rows;
+  // The top of each list reordered by the reranker; what follows the pool keeps its order.
+  for (const [name, search] of firsts) {
+    rows.push(
+      await row(`${name}, top ${POOL} reranked by ${reranker.model}`, async (question) => {
+        const list = search(question);
+        return [...(await reranker.rerank(question, list.slice(0, POOL))), ...list.slice(POOL)];
+      }),
+    );
+  }
   return rows;
 }
 
@@ -103,6 +135,8 @@ if (import.meta.main) {
       questions: { type: 'string', default: 'eval/questions.jsonc' },
       cache: { type: 'string', default: 'data/embeddings.json' },
       embed: { type: 'boolean', default: false },
+      'rerank-cache': { type: 'string', default: 'data/reranks.json' },
+      rerank: { type: 'boolean', default: false },
     },
   });
   const corpus = JSON.parse(readFileSync(values.passages, 'utf8')) as Corpus;
@@ -127,5 +161,40 @@ if (import.meta.main) {
         'Run with --embed and VOYAGE_API_KEY set to embed them.\n',
     );
   }
-  console.log(tables(corpus, evaluateSearch(corpus.passages, questions, graph, dense)));
+  // A first pass that only reads the rerank cache counts what is missing; without --rerank a run
+  // with anything missing leaves the reranked rows out and sends nothing.
+  const reranks = new RerankCache(values['rerank-cache']);
+  let misses = 0;
+  let chars = 0;
+  const probe: Reranker = {
+    model: RERANK_MODEL,
+    rerank: async (question, pool) => {
+      const got = await rerank(reranks, question, pool, embeddingText, {}).catch(() => undefined);
+      if (got) return got.items;
+      misses++;
+      chars += question.length * pool.length + pool.reduce((n, p) => n + embeddingText(p).length, 0);
+      return pool;
+    },
+  };
+  let rows = await evaluateSearch(corpus.passages, questions, graph, dense, dense ? probe : undefined);
+  if (dense && misses > 0 && values.rerank) {
+    let billed = 0;
+    const live: Reranker = {
+      model: RERANK_MODEL,
+      rerank: async (question, pool) => {
+        const got = await rerank(reranks, question, pool, embeddingText, { apiKey: process.env.VOYAGE_API_KEY });
+        billed += got.tokens;
+        return got.items;
+      },
+    };
+    rows = await evaluateSearch(corpus.passages, questions, graph, dense, live);
+    console.log(`Reranked ${misses} pools with ${RERANK_MODEL}: ${billed} tokens.\n`);
+  } else if (dense && misses > 0) {
+    rows = rows.filter((r) => !r.name.includes('reranked'));
+    console.log(
+      `Reranked rows left out: ${misses} pools are not cached (about ${Math.ceil(chars / 4).toLocaleString('en')} tokens ` +
+        `billed). Run with --rerank and VOYAGE_API_KEY set to rerank them.\n`,
+    );
+  }
+  console.log(tables(corpus, rows));
 }
