@@ -13,6 +13,7 @@
     "eval": "node src/eval/run.ts",
     "chunk": "node src/docs/build.ts",
     "eval:docs": "node src/docs/evaluate.ts",
+    "answer": "node src/docs/answer.ts",
     "mcp": "node src/mcp/server.ts",
     "demo": "node src/demo.ts",
     "test": "node --test \"test/**/*.test.ts\"",
