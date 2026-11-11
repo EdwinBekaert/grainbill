@@ -131,8 +131,9 @@ export const PIECE_CHARS = 1_500;
 
 // Cuts lines [from, to) into pieces of at most about PIECE_CHARS: whole paragraphs where they fit,
 // else line by line, which on a page of one sentence per line cuts between sentences. A fenced
-// block counts as one paragraph, blank lines included. A single line is never cut, so a passage
-// of one long line (a wide table row) may pass the size. Returns [start, end) line indexes.
+// block counts as one paragraph, blank lines included, and a long one is cut between its lines
+// like any other. A single line is never cut, so a passage of one long line (a wide table row)
+// may pass the size. Returns [start, end) line indexes.
 export function pieces(lines: string[], from: number, to: number): [number, number][] {
   const units: [number, number][] = [];
   let i = from;
@@ -155,17 +156,11 @@ export function pieces(lines: string[], from: number, to: number): [number, numb
     i = j;
   }
   const out: [number, number][] = [];
-  let size = 0;
   for (const [a, b] of units) {
-    const n = lines.slice(a, b).join('\n').length;
     const last = out.at(-1);
-    if (last && size + n <= PIECE_CHARS) {
-      last[1] = b;
-      size += n;
-    } else {
-      out.push([a, b]);
-      size = n;
-    }
+    // The size of the merged piece, blank lines between the units included.
+    if (last && lines.slice(last[0], b).join('\n').length <= PIECE_CHARS) last[1] = b;
+    else out.push([a, b]);
   }
   return out;
 }
@@ -176,12 +171,17 @@ export function chunkRecipe(path: string, place: string, source: string): Passag
   const steps = field(root, 'steps');
   const passages: Passage[] = [];
 
-  // The header comment and what the recipe says of itself.
-  const headerEnd = steps ? firstLine(steps) - 1 : root.end;
+  // The header comment, what the recipe says of itself, and its other settings with their comments.
+  // It ends on the `"steps": [` line, so every line of the recipe lies in some passage, unless
+  // a step starts on that line too.
+  const first = steps?.type === 'array' ? steps.items[0] : undefined;
+  const headerEnd = !steps ? root.end : first && firstLine(first) === steps.start ? steps.start - 1 : steps.start;
   const about = [recipe.type && `type ${recipe.type}`, recipe.description].filter(Boolean).join(': ');
-  passages.push(
-    passage(path, 'recipe', place, 1, headerEnd, [prose(root.comments), about].filter(Boolean).join('\n')),
-  );
+  const settings = (root.type === 'object' ? root.entries : [])
+    .filter(([k]) => !['$schema', 'name', 'type', 'description', 'steps'].includes(k))
+    .map(([k, v]) => [render({ [k]: plain(v) }), prose(commentsIn(v))].filter(Boolean).join(': '));
+  const header = [prose(root.comments), about, ...settings].filter(Boolean).join('\n');
+  passages.push(passage(path, 'recipe', place, 1, headerEnd, header));
 
   const walk = (items: Node[], chain: string[]) => {
     items.forEach((step, i) => {
@@ -191,12 +191,13 @@ export function chunkRecipe(path: string, place: string, source: string): Passag
       const { parallel, id, ...rest } = value;
       const title = [place, ...chain, name].join(SEP);
       if (group?.type === 'array') {
-        // The group's own words; each member is a passage of its own.
+        // The group's own words; each member is a passage of its own too. The group's range is
+        // the whole step, since its fields may sit after the members (`onFindings`).
         const own = step.type === 'object' ? step.entries.filter(([k]) => k !== 'parallel') : [];
         const comments = [...step.comments, ...own.flatMap(([, v]) => commentsIn(v))];
         const members = (parallel as Record<string, unknown>[]).map((m) => m.id).join(', ');
         const text = [`runs side by side: ${members}`, render(rest), prose(comments)].filter(Boolean).join('\n');
-        passages.push(passage(path, 'recipe', title, firstLine(step), group.start, text));
+        passages.push(passage(path, 'recipe', title, firstLine(step), step.end, text));
         walk(group.items, [...chain, name]);
         return;
       }

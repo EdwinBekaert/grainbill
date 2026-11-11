@@ -105,35 +105,56 @@ test('a recipe is a header passage and one passage per step, members of a group 
     '  "name": "nip",', //                             3
     '  "type": "brew",', //                            4
     '  "description": "Quick fix",', //                5
-    '  "steps": [', //                                 6
-    '    // Writes failing tests.', //                 7
-    '    { "id": "gauge", "brewer": "gauger" },', //   8
-    '    {', //                                        9
-    '      // Findings go back.', //                   10
-    '      "id": "taste",', //                         11
-    '      "onFindings": { "goto": "gauge", "maxRounds": 2 },', // 12
-    '      "parallel": [', //                         13
-    '        { "id": "security", "brewer": "taster", "lens": "diff/security" }', // 14
-    '      ]', //                                      15
-    '    },', //                                       16
-    '    { "action": "openPullRequest" }', //          17
-    '  ]', //                                          18
-    '}', //                                            19
+    '  // Tests come first.', //                       6
+    '  "testFirst": true,', //                         7
+    '  "steps": [', //                                 8
+    '    // Writes failing tests.', //                 9
+    '    { "id": "gauge", "brewer": "gauger" },', //   10
+    '    {', //                                        11
+    '      // Findings go back.', //                   12
+    '      "id": "taste",', //                         13
+    '      "parallel": [', //                         14
+    '        { "id": "security", "brewer": "taster", "lens": "diff/security" }', // 15
+    '      ],', //                                     16
+    '      "onFindings": { "goto": "gauge", "maxRounds": 2 }', // 17
+    '    },', //                                       18
+    '    { "action": "openPullRequest" }', //          19
+    '  ]', //                                          20
+    '}', //                                            21
   ].join('\n');
   const ps = chunk('defaults/recipes/nip.jsonc', recipe);
   assert.deepEqual(
     ps.map((p) => [p.title, p.start, p.end, p.text]),
     [
-      ['recipe nip', 1, 5, 'Nip, the quick fix.\ntype brew: Quick fix'],
-      ['recipe nip › gauge', 7, 8, 'brewer gauger\nWrites failing tests.'],
+      ['recipe nip', 1, 8, 'Nip, the quick fix.\ntype brew: Quick fix\ntestFirst true: Tests come first.'],
+      ['recipe nip › gauge', 9, 10, 'brewer gauger\nWrites failing tests.'],
       [
         'recipe nip › taste',
-        9,
-        13,
+        11,
+        18,
         'runs side by side: security\nonFindings (goto gauge, maxRounds 2)\nFindings go back.',
       ],
-      ['recipe nip › taste › security', 14, 14, 'brewer taster, lens diff/security'],
-      ['recipe nip › openPullRequest', 17, 17, 'action openPullRequest'],
+      ['recipe nip › taste › security', 15, 15, 'brewer taster, lens diff/security'],
+      ['recipe nip › openPullRequest', 19, 19, 'action openPullRequest'],
+    ],
+  );
+  // Every line that holds more than brackets is cited by some passage.
+  recipe.split('\n').forEach((line, i) => {
+    if (/^[\s[\]{},]*$/.test(line)) return;
+    assert.ok(
+      ps.some((p) => p.start <= i + 1 && p.end >= i + 1),
+      `line ${i + 1} is in no passage`,
+    );
+  });
+});
+
+test('a recipe header leaves out a steps line that holds a step', () => {
+  const recipe = '{\n  "name": "mash-in",\n  "steps": [{ "id": "innkeep", "brewer": "innkeeper" }]\n}';
+  assert.deepEqual(
+    chunk('defaults/recipes/mash-in.jsonc', recipe).map((p) => [p.title, p.start, p.end]),
+    [
+      ['recipe mash-in', 1, 2],
+      ['recipe mash-in › innkeep', 3, 3],
     ],
   );
 });
