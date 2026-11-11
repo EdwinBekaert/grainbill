@@ -143,7 +143,8 @@ export function adrGraph(statuses: Map<string, string>): AdrGraph {
   return { links, later, earlier, oneSided };
 }
 
-// Every ADR that changed `number`, directly or through another later ADR, oldest first.
+// Every ADR that changed `number`, directly or through another later ADR, by number (which is not
+// the order they were decided in: 0079 amends 0084).
 export function successors(graph: AdrGraph, number: string): string[] {
   const seen = new Set<string>();
   const visit = (n: string) => {
