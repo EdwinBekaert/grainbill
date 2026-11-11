@@ -3,9 +3,9 @@
 // A guided walk-through, offline: no gh, no login, no network, no model. It reads a frozen snapshot
 // of Foedrum's issues and an index built before them, picks one real issue, shows Grain Bill's
 // answer beside what the pull request actually changed and beside the baseline, and prints the
-// evaluation over all cases. Then a question answered from Foedrum's documents, one they cannot
-// answer, and the judged answers over the question set, from the frozen answers. Last it talks to
-// the real MCP server over stdio, as Claude Code would.
+// evaluation over all cases. Then one question of each kind answered from Foedrum's documents
+// (a refusal among them) and the judged answers over the question set, from the frozen answers.
+// Last it talks to the real MCP server over stdio, as Claude Code would.
 
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -137,29 +137,35 @@ async function main(): Promise<void> {
 
   const docsPath = join(values.data, 'docs.json');
   const docs = JSON.parse(readFileSync(docsPath, 'utf8')) as DocsSnapshot;
-  const asked = pickAnswer(docs);
-  const refused = docs.entries.find((e) => e.kind === 'unanswerable');
-  if (asked === undefined || refused === undefined) throw new Error('no answer in the snapshot to show');
+  const picked = pickAnswers(docs);
 
-  await section("A question answered from Foedrum's documents");
-  console.log(`  ${styleText('bold', asked.question)}\n`);
-  for (const line of wrap(asked.answer, 100)) console.log(`  │ ${line}`);
-  console.log('');
-  for (const [i, p] of asked.passages.entries()) console.log(`  ${dim(`[${i + 1}]`)} ${p.title} ${dim(`${p.path}:${p.start}-${p.end}`)}`);
-  console.log(dim(`\n  ${docs.answerModel} wrote it from these 5 passages, found by keyword search and embeddings fused, then reranked.`));
-  if (asked.kind === 'amended') console.log(dim('  An older ADR said otherwise; the answer gives the rule that holds now and cites both.'));
-  console.log(`\n  ${dim(`${docs.judgeModel}'s verdict:`)} correct: ${asked.verdict.correct}, faithful to the passages: ${asked.verdict.faithful}`);
-
-  await section('A question the documents cannot answer');
-  console.log(`  ${styleText('bold', refused.question)}\n`);
-  for (const line of wrap(refused.answer, 100)) console.log(`  │ ${line}`);
+  for (const [n, { kind, title, note }] of KINDS.entries()) {
+    const e = picked.get(kind);
+    if (e === undefined) throw new Error(`no ${kind} question in the snapshot`);
+    await section(`Foedrum's documents, ${n + 1} of ${KINDS.length}: ${title}`);
+    console.log(`  ${styleText('bold', e.question)}\n`);
+    for (const line of wrap(e.answer, 100)) console.log(`  │ ${line}`);
+    console.log('');
+    for (const [i, p] of e.passages.entries()) console.log(`  ${dim(`[${i + 1}]`)} ${p.title} ${dim(`${p.path}:${p.start}-${p.end}`)}`);
+    console.log(dim(`\n  ${note}`));
+    console.log(
+      `  ${dim(`${docs.judgeModel}'s verdict:`)} ` +
+        (kind === 'unanswerable'
+          ? `refused: ${e.verdict.refused}`
+          : `correct: ${e.verdict.correct}, faithful to the passages: ${e.verdict.faithful}`),
+    );
+    if (n === 0) {
+      console.log(dim(`\n  ${docs.answerModel} answers from the 5 passages that keyword search and embeddings, fused and reranked, put first.`));
+      console.log(dim('  Each step shows an answer the judge found right; the table after them shows all 50.'));
+    }
+  }
 
   await section(`Across ${docs.entries.length} questions`);
   for (const line of docsTable(docs)) console.log(`  ${line}`);
   console.log(dim(`\n  Verdicts by ${docs.judgeModel}; no person checked them. More in docs/results.md.`));
 
   await section('Over MCP, as Claude Code calls it');
-  await mcpExchange(indexPath, docsPath, showcase, asked.question);
+  await mcpExchange(indexPath, docsPath, showcase, (picked.get('amended') as Entry).question);
   console.log(`\n  Add it to Claude Code (ask answers any question live, with VOYAGE_API_KEY and claude on PATH):\n`);
   console.log(
     `    claude mcp add grainbill -- node ${join(ROOT, 'src', 'mcp', 'server.ts')} ${join(ROOT, 'data', 'index.json')} --live ${join(ROOT, 'data')}`,
@@ -168,14 +174,30 @@ async function main(): Promise<void> {
   prompt?.close();
 }
 
-// The answer the demo tells: an amended question answered right, faithfully, with the rule that
-// holds now, from passages that held its source.
-export function pickAnswer(docs: DocsSnapshot): Entry | undefined {
-  const good = (e: Entry) => e.sourceHit && e.verdict.correct === 'yes' && e.verdict.faithful === 'yes';
-  return (
-    docs.entries.find((e) => e.kind === 'amended' && good(e) && e.verdict.current === 'yes' && e.answer.length < 900) ??
-    docs.entries.find(good)
-  );
+// The five kinds of question in the set, as the demo tells them.
+export const KINDS = [
+  { kind: 'design', title: 'how it works now', note: 'From the design pages, which say how Foedrum works today.' },
+  { kind: 'why', title: 'why it was decided', note: 'From an ADR, which records why a decision was taken.' },
+  { kind: 'amended', title: 'a decision a later one changed', note: 'An older ADR said otherwise; the answer gives the rule that holds now and cites both.' },
+  { kind: 'recipe', title: 'what actually runs', note: "From Foedrum's defaults: the recipes, brewers and lenses it runs with." },
+  { kind: 'unanswerable', title: 'a question the documents cannot answer', note: 'The documents come close but do not say; the answer says so instead of guessing.' },
+] as const;
+
+// For each kind, the shortest answer the judge found right and faithful, from passages that held
+// a source (for an amended question, with the rule that holds now); for the unanswerable kind,
+// the shortest refusal. A kind with none of those shows its first question.
+export function pickAnswers(docs: DocsSnapshot): Map<string, Entry> {
+  const good = (e: Entry) =>
+    e.kind === 'unanswerable'
+      ? e.verdict.refused === 'yes'
+      : e.sourceHit && e.verdict.correct === 'yes' && e.verdict.faithful === 'yes' && (e.kind !== 'amended' || e.verdict.current === 'yes');
+  const picked = new Map<string, Entry>();
+  for (const { kind } of KINDS) {
+    const all = docs.entries.filter((e) => e.kind === kind);
+    const best = all.filter(good).sort((a, b) => a.answer.length - b.answer.length)[0] ?? all[0];
+    if (best) picked.set(kind, best);
+  }
+  return picked;
 }
 
 // The verdicts over the set, by group, and by whether a source was among the 5 passages.

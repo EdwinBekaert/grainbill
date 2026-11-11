@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { type DocsSnapshot, type Entry, renderAnswer, snapshotAsk } from '../src/docs/ask.ts';
-import { docsTable, pickAnswer, wrap } from '../src/demo.ts';
+import { docsTable, pickAnswers, wrap } from '../src/demo.ts';
 import { createHandler } from '../src/mcp/protocol.ts';
 import { askTool } from '../src/mcp/server.ts';
 
@@ -67,7 +67,12 @@ test('the ask tool answers from the snapshot, and a question outside it is a too
 });
 
 test('the demo picks an amended answer that is right, and tables the verdicts by source hit', () => {
-  assert.equal(pickAnswer(snapshot)?.id, 'amended-01');
+  const picked = pickAnswers(snapshot);
+  assert.equal(picked.get('amended')?.id, 'amended-01');
+  // design-01 is right; design-02 is wrong and not shown.
+  assert.equal(picked.get('design')?.id, 'design-01');
+  assert.equal(picked.get('unanswerable')?.id, 'unanswerable-01');
+  assert.equal(picked.has('recipe'), false);
   assert.deepEqual(docsTable(snapshot), [
     '| Questions | Correct | Partly | Wrong | Faithful |',
     '|---|---|---|---|---|',
