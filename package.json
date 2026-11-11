@@ -1,0 +1,23 @@
+{
+  "name": "grainbill",
+  "version": "0.1.0",
+  "description": "Which modules or repositories does a feature request touch? Retrieval over code, evaluated on real pull requests, served over MCP.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "index": "node src/build-index.ts",
+    "eval:prepare": "node src/eval/prepare.ts",
+    "eval": "node src/eval/run.ts",
+    "mcp": "node src/mcp/server.ts",
+    "demo": "node src/demo.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
+  }
+}
