@@ -1,11 +1,15 @@
-// The MCP server: a stdio server with one tool, `impact`, which a Claude Code session (or any MCP
-// client) calls with a feature request to get the ranked modules with their evidence.
+// The MCP server: a stdio server for a Claude Code session (or any MCP client) with two tools.
+// `impact` takes a feature request and returns the ranked modules with their evidence; `ask` takes
+// a question about Foedrum and returns a cited answer from its documents, from the frozen snapshot
+// (--docs) or live (--live <data dir>, which calls Voyage and `claude -p`).
 //
-//   claude mcp add grainbill -- node <path>/src/mcp/server.ts <path>/data/index.json
+//   claude mcp add grainbill -- node <path>/src/mcp/server.ts <path>/data/index.json --live <path>/data
 
 import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { parseArgs } from 'node:util';
 import type { Index } from '../cards.ts';
+import { type Asked, createLiveAsk, type DocsSnapshot, renderAnswer, snapshotAsk } from '../docs/ask.ts';
 import { createImpact, type ModuleHit } from '../impact.ts';
 import { createHandler, type Tool, ToolError } from './protocol.ts';
 
@@ -49,12 +53,56 @@ export function impactTool(index: Index): Tool {
   };
 }
 
+// Where `ask` gets its answers: the frozen snapshot of the question set, or live (any question).
+export type Asker = { rev: string; ask: (question: string) => Asked | undefined | Promise<Asked | undefined> };
+
+export function askTool(asker: Asker, live: boolean): Tool {
+  return {
+    name: 'ask',
+    description:
+      "Answer a question about Foedrum's design, decisions (ADRs) or recipes from its documents: the five " +
+      'best passages and an answer that cites them by number, or NOT COVERED when they do not say. ' +
+      (live
+        ? 'A new question costs a search and a model call.'
+        : 'This server answers only the 50 questions of its evaluation set, from a snapshot.'),
+    inputSchema: {
+      type: 'object',
+      properties: { question: { type: 'string', description: 'The question, in plain words' } },
+      required: ['question'],
+    },
+    call: async ({ question }) => {
+      if (typeof question !== 'string' || question.trim() === '') throw new ToolError('question must be a non-empty string');
+      let asked: Asked | undefined;
+      try {
+        asked = await asker.ask(question);
+      } catch (e) {
+        throw new ToolError(`could not answer: ${(e as Error).message}`);
+      }
+      if (asked === undefined) throw new ToolError('not in the snapshot: this server answers only the questions of its evaluation set');
+      return renderAnswer(asked, asker.rev);
+    },
+  };
+}
+
 if (import.meta.main) {
-  const index = JSON.parse(readFileSync(process.argv[2] ?? 'data/index.json', 'utf8')) as Index;
-  const handle = createHandler({ name: 'grainbill', version: '0.1.0' }, [impactTool(index)]);
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: { docs: { type: 'string' }, live: { type: 'string' } },
+  });
+  const index = JSON.parse(readFileSync(positionals[0] ?? 'data/index.json', 'utf8')) as Index;
+  const tools = [impactTool(index)];
+  if (values.live !== undefined) {
+    const voyageKey = process.env.VOYAGE_API_KEY;
+    const live = await createLiveAsk({ dir: values.live, ...(voyageKey ? { voyageKey } : {}) });
+    tools.push(askTool(live, true));
+  } else if (values.docs !== undefined) {
+    const snapshot = JSON.parse(readFileSync(values.docs, 'utf8')) as DocsSnapshot;
+    tools.push(askTool({ rev: snapshot.foedrum.rev, ask: snapshotAsk(snapshot) }, false));
+  }
+  const handle = createHandler({ name: 'grainbill', version: '0.2.0' }, tools);
   for await (const line of createInterface({ input: process.stdin })) {
     if (line.trim() === '') continue;
-    const response = handle(line);
+    const response = await handle(line);
     if (response !== undefined) process.stdout.write(`${JSON.stringify(response)}\n`);
   }
 }

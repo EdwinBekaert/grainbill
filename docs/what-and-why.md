@@ -5,7 +5,7 @@
 [Foedrum](https://github.com/EdwinBekaert/foedrum) runs Claude agents through pipelines and turns GitHub issues into pull requests.
 Its planner breaks a feature request into sub-orders, one repository each, and has to know where in the code a feature lives.
 
-## M1: keyword search over code (this version)
+## M1: keyword search over code
 
 Given an issue's text, rank the folders of a codebase it is likely to change.
 
@@ -18,38 +18,24 @@ Given an issue's text, rank the folders of a codebase it is likely to change.
 
 No model is used anywhere: it is word counting.
 
-### Results
-
-The index is built at a commit older than every evaluated pull request, so it has not seen the code they wrote.
-
-| Search | Hit@1 | Recall@3 | Recall@5 |
-|---|---|---|---|
-| no search: the busiest folders | 76.0% | 70.1% | 83.4% |
-| BM25 over file paths | 84.0% | 72.6% | 87.9% |
-| BM25 over paths, exports, comments | 89.0% | 82.6% | 94.6% |
-
-Hit@1: the first folder is one the pull request changed.
-Recall@k: the share of the changed folders found in the top k.
-
-### What M1 does not show
-
-- There are 9 folders and a pull request changes 2.5 of them, so always answering with the three busiest already finds 70%: the task is close to a choice among a few classes.
-- Nothing generates an answer, and there are no embeddings, no chunking and no reranking: it is search, not RAG.
-
-What it does carry forward: the time split, the evaluation harness, the BM25 search and the MCP server.
+The results, and what they do not show, are in [results.md](results.md#m1-which-folders-an-issue-touches).
+What M1 carries forward: the time split, the evaluation harness, the BM25 search and the MCP server.
 
 ## M2: questions answered from Foedrum's documents
 
 A question such as "why does the push gate run no tests?" answered from Foedrum's 346 ADRs, 67 design pages and its recipes, with citations, and measured on the answer as well as the search.
 
-1. **Chunking** per kind of document: design pages by heading, ADRs by section, recipes one step at a time.
-2. **Hybrid search**: BM25 for exact words, embeddings (Voyage) for meaning, merged by reciprocal rank fusion, then a reranker. Each stage is a row in the results table.
-3. **Authority**: an ADR that a later one amends is fetched with its successor, and the newest decision is the answer.
-4. **Generation**: Claude answers only from the retrieved passages, cites each claim, and says so when the documents do not cover the question.
-5. **Evaluation**: about 50 questions with known answers and sources, including amended decisions and questions the documents cannot answer; retrieval recall per stage, and the answers judged for correctness, faithfulness to their sources and correct refusals.
-6. **Demo**: embeddings and the demo's answers cached in the snapshot, so `npm run demo` stays offline and free; a live mode asks new questions with API keys.
+As built:
 
-Expected cost of a full evaluation run: well under a dollar.
+1. **Chunking** per kind of document: design pages and ADRs by heading with breadcrumbs, recipes parsed from JSONC into one passage per step, every passage with its line range for citations.
+2. **Hybrid search**: BM25 for exact words, Voyage `voyage-4` embeddings for meaning, merged by reciprocal rank fusion, then the top 30 reranked by `rerank-3-lite`. Each stage is a row in the results table.
+3. **Authority**: the links between ADRs read from their status lines. Fetching every later ADR beside an earlier one made search worse, so it is kept as a measured row and not used; instead each ADR passage reaches the answer with its status line, and the prompt says a later ADR holds over the one it amends.
+4. **Generation**: Claude Haiku 5.5, through headless Claude Code, answers only from the top 5 passages, cites a passage after every sentence, and replies `NOT COVERED` when they do not answer.
+5. **Evaluation**: 50 questions with known answers and sources, including amended decisions and questions the documents cannot answer; recall per search stage, and the answers judged by Claude Sonnet 5.5 for correctness, faithfulness to their passages, the current rule and refusals. No person checks the verdicts.
+6. **Serving**: the MCP tool `ask(question)` and `npm run ask`, live; the demo and the demo's server answer from a frozen snapshot of the 50 answers, offline.
+
+The results are in [results.md](results.md).
+A full run is about a million tokens of Voyage embeddings (once; cached), and a few hundred thousand tokens each for reranking, answers and verdicts.
 
 ## Decisions
 

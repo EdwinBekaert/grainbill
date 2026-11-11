@@ -15,6 +15,8 @@
     "eval:docs": "node src/docs/evaluate.ts",
     "answer": "node src/docs/answer.ts",
     "judge": "node src/docs/judge.ts",
+    "ask": "node src/docs/ask.ts",
+    "snapshot:docs": "node src/docs/snapshot.ts",
     "mcp": "node src/mcp/server.ts",
     "demo": "node src/demo.ts",
     "test": "node --test \"test/**/*.test.ts\"",

@@ -156,7 +156,7 @@ export async function answerAll(
     if (!reply && opts.ask) {
       reply = await askClaude(prompt, { model: opts.model, system: SYSTEM, ...(opts.run ? { run: opts.run } : {}) });
       cache.set(key, reply);
-      console.log(`${question.id}: ${reply.usage.outputTokens} tokens out`);
+      console.error(`${question.id}: ${reply.usage.outputTokens} tokens out`);
     }
     if (!reply) {
       missing++;

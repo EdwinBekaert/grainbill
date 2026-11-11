@@ -1,0 +1,2428 @@
+{
+ "foedrum": {
+  "rev": "2d64a6e3904c8f514efa135237035c45ae42a57a",
+  "revDate": "2026-11-11T17:23:04+01:00"
+ },
+ "answerModel": "claude-haiku-5-5",
+ "judgeModel": "claude-sonnet-5-5",
+ "entries": [
+  {
+   "id": "design-01",
+   "kind": "design",
+   "question": "Where does Foedrum keep its durable state, and what happens when pushing that state is rejected?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Foedrum keeps its durable state in the Brewery git repository on a dedicated `foedrum/state` branch, with a folder per batch holding an append-only `events.jsonl` and its out docs [1][2]. SQLite is the local index and working store, and `foedrum serve` rebuilds it from that branch when it is missing or behind [2][5]. The branch is separate so the engine is its only writer, so a rejected push means another engine wrote in between [4]. ADR 0263 withdraws ADR 0011's \"noise\" reason for the separate branch but keeps the decision itself [3][4]. A push rejected as non-fast-forward stops the engine (`StateBranchStopError`) instead of merging, and Foedrum never merges or rewrites state history [1][2][5].",
+   "passages": [
+    {
+     "path": "docs/design/engine/state-branch.md",
+     "start": 1,
+     "end": 24,
+     "title": "engine › state-branch › State in the Brewery repository"
+    },
+    {
+     "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+     "start": 8,
+     "end": 15,
+     "title": "ADR 0011 › State in the Brewery repository › Decision"
+    },
+    {
+     "path": "docs/adr/0263-the-state-branch-is-separate-so-the-engine-is-its-only-writer.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0263 › The state branch is separate so the engine is its only writer › Context"
+    },
+    {
+     "path": "docs/adr/0263-the-state-branch-is-separate-so-the-engine-is-its-only-writer.md",
+     "start": 10,
+     "end": 12,
+     "title": "ADR 0263 › The state branch is separate so the engine is its only writer › Decision"
+    },
+    {
+     "path": "docs/design/engine/state-branch.md",
+     "start": 40,
+     "end": 47,
+     "title": "engine › state-branch › State in the Brewery repository"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer states durable state is in the Brewery git repo (foedrum/state branch) and that a rejected push stops the engine instead of merging, matching the reference; the extra details (SQLite as local index, rebuild, ADR 0263 withdrawing the noise reason, StateBranchStopError) are all stated in the cited passages."
+   }
+  },
+  {
+   "id": "design-02",
+   "kind": "design",
+   "question": "If the Foedrum process crashes and I start it again, what happens to the jobs that were in flight?",
+   "paraphrased": true,
+   "sourceHit": false,
+   "answer": "Foedrum is meant to recover from a crash at any moment without losing or duplicating work [2]. With the switch on, a brewer whose attempt crashed continues its own session in its own worktree, uncommitted work included, once the run's lease is gone [1]. The passages do not name that switch, so I can't say whether it is on by default. If the session cannot be resumed, that costs one of the step's `maxAttempts`, and with none left the step is Stuck as `attempts_exhausted` [1]. An attempt lost with its driver starts fresh after a retry, though its worktree may hold its work, and telling that the process is gone needs the runner to record it (a follow-up, #37) [1]. If the crash hit during a `foedrum resume`, the process's lease expires rather than staying held, since a foedrum killed with claude still running leaves a lease that expires [4].",
+   "passages": [
+    {
+     "path": "docs/adr/0117-a-retry-resumes-the-session-of-the-attempt-before-it-in-that-attempt-s-worktree.md",
+     "start": 34,
+     "end": 41,
+     "title": "ADR 0117 › A retry resumes the session of the attempt before it, in that attempt's worktree › Consequences"
+    },
+    {
+     "path": "docs/adr/0002-event-sourced-engine-on-node-sqlite.md",
+     "start": 5,
+     "end": 6,
+     "title": "ADR 0002 › Event-sourced engine on `node:sqlite` › Context"
+    },
+    {
+     "path": "docs/adr/0124-foedrum-takeover-hands-a-batch-to-another-driver-as-a-recorded-command.md",
+     "start": 35,
+     "end": 36,
+     "title": "ADR 0124 › `foedrum takeover` hands a batch to another driver as a recorded command › Decision › What the driver that lost the batch does"
+    },
+    {
+     "path": "docs/adr/0126-foedrum-resume-opens-a-finished-attempt-s-session-in-its-worktree.md",
+     "start": 24,
+     "end": 24,
+     "title": "ADR 0126 › `foedrum resume` opens a finished attempt's session in its worktree › Decision"
+    },
+    {
+     "path": "docs/adr/0127-foedrum-resume-takes-a-running-batch-over-and-continues-its-step-s-session.md",
+     "start": 38,
+     "end": 40,
+     "title": "ADR 0127 › `foedrum resume` takes a running batch over and continues its step's session › Decision › resume drives the batch until the resumed attempt ended"
+    }
+   ],
+   "verdict": {
+    "correct": "no",
+    "faithful": "no",
+    "unsupported": [
+     "a brewer whose attempt crashed continues its session once the run's lease is gone, presented as what happens on restart of the process",
+     "if the crash hit during foedrum resume, the lease expires rather than staying held",
+     "the passages do not state that the driver expires attempt leases on start or that batch leases are kept"
+    ],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer never says that on start the driver expires its earlier attempt leases so the supervisor treats those attempts as lost, or that its batch leases are kept so it carries on driving them; it instead describes retry-resume behaviour and a resume-crash lease expiry that do not address the restart question."
+   }
+  },
+  {
+   "id": "design-03",
+   "kind": "design",
+   "question": "How often does Foedrum look at GitHub for new work, and does that eat into my API allowance?",
+   "paraphrased": true,
+   "sourceHit": false,
+   "answer": "Foedrum's intake polls GitHub every 60 seconds [1]. An unchanged repository costs one 304 response per page and pull request each minute, which does not count against the primary rate limit, and a changed one costs one 200 response per page that changed [1]. Requests are made with the `gh` login, whose limit is 5,000 requests an hour for a user, shared with anything else the user does with `gh` [3]. When a limit is met, Foedrum stops making requests and skips its polls until GitHub says it may resume [1][2]. Wiring the intake into the program and polling the Brewery's own issues is still tracked as #145 [2].",
+   "passages": [
+    {
+     "path": "docs/adr/0052-github-reads-rate-limit-pauses-and-the-polling-interval.md",
+     "start": 37,
+     "end": 39,
+     "title": "ADR 0052 › GitHub reads: conditional requests, rate-limit pauses and the polling interval › Decision › The polling interval"
+    },
+    {
+     "path": "docs/adr/0052-github-reads-rate-limit-pauses-and-the-polling-interval.md",
+     "start": 41,
+     "end": 45,
+     "title": "ADR 0052 › GitHub reads: conditional requests, rate-limit pauses and the polling interval › Consequences"
+    },
+    {
+     "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+     "start": 41,
+     "end": 47,
+     "title": "ADR 0073 › GitHub only through `gh`'s own login: Foedrum never holds a token › Consequences"
+    },
+    {
+     "path": "docs/adr/0052-github-reads-rate-limit-pauses-and-the-polling-interval.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0052 › GitHub reads: conditional requests, rate-limit pauses and the polling interval"
+    },
+    {
+     "path": "docs/adr/0072-the-status-comment-edits-as-revisions-in-the-ledger.md",
+     "start": 5,
+     "end": 12,
+     "title": "ADR 0072 › The status comment: edits as revisions in the ledger, one a minute per order › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives the 60-second interval and that unchanged polls are 304s not counted against the primary limit, but never mentions the ETag of the previous answer that makes them conditional; the extras on pauses and the gh login limit are supported by passages [1]-[3]."
+   }
+  },
+  {
+   "id": "design-04",
+   "kind": "design",
+   "question": "What is the open-order limit, what is its default, and which orders count as open?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "The open-order limit is `openOrders` in foedrum.jsonc, beside `concurrency`; it ranges from 1 to 20 and defaults to 3 [2]. It holds a new order, whether a Brewery issue or a target issue, while that many orders are open, and a held target issue is not claimed [1]. An order is open when it is a Brewery issue or a claimed target issue with work left: a batch of it, its own or a sub-order's, is Ordered, Brewing, Conditioning or Stuck, or a sub-order of its latest breakdown has no batch while the latest batch is not cancelled [1][3]. So a paused, stopped or Stuck order counts, while an order whose batches are all On tap or cancelled does not, even with its pull request still open [1][3]. A sub-order blocked by a closed pull request, or whose own issue a person closed, keeps its order open until a person orders the blocker again, a new breakdown leaves it out, or the order is cancelled [1][3].",
+   "passages": [
+    {
+     "path": "docs/design/intake/limits.md",
+     "start": 19,
+     "end": 24,
+     "title": "intake › limits › Limits"
+    },
+    {
+     "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+     "start": 50,
+     "end": 53,
+     "title": "ADR 0217 › A recipe's concurrency and the open-order limit hold what the intake starts › Decision › The settings"
+    },
+    {
+     "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+     "start": 37,
+     "end": 44,
+     "title": "ADR 0217 › A recipe's concurrency and the open-order limit hold what the intake starts › Decision › An order in progress"
+    },
+    {
+     "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+     "start": 5,
+     "end": 9,
+     "title": "ADR 0217 › A recipe's concurrency and the open-order limit hold what the intake starts › Context"
+    },
+    {
+     "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+     "start": 87,
+     "end": 87,
+     "title": "ADR 0217 › A recipe's concurrency and the open-order limit hold what the intake starts › Alternatives considered"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives openOrders with range 1 to 20 and default 3, and the open-order definition (Ordered, Brewing, Conditioning or Stuck batches; paused, stopped and Stuck count; only On tap or cancelled does not), all stated in passages 1-3."
+   }
+  },
+  {
+   "id": "design-05",
+   "kind": "design",
+   "question": "What is the difference between `foedrum pause` and `foedrum stop`?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "`foedrum pause` holds work without killing it: no new attempt starts, a running attempt ends at its next convenient point, and what it schedules waits without its deadline until `continue` [2]. `foedrum stop` ends an order's work at once: each brewing batch goes Stuck with reason `stopped`, and its unfinished attempts are abandoned and marked `stopped` so the driver stops their process trees at its next tick [3][4]. Stop applies to one order and has no `--all`, so `pause --all --by` is the way to stop everything that runs [3][4][2]. Under ADR 0302, which amends ADR 0205, a stopped attempt's end is recorded, it counts toward no `maxAttempts`, and its `retry` resumes the session, so `retry` continues from the same step [1][4][3].",
+   "passages": [
+    {
+     "path": "docs/adr/0302-a-stopped-attempt-s-end-is-recorded-and-its-retry-resumes-its-session-and-spends-no-attempt.md",
+     "start": 5,
+     "end": 11,
+     "title": "ADR 0302 › A stopped attempt's end is recorded, and its retry resumes its session and spends no attempt › Context"
+    },
+    {
+     "path": "docs/design/humans/pause.md",
+     "start": 1,
+     "end": 16,
+     "title": "humans › pause › Pause, continue and stop"
+    },
+    {
+     "path": "docs/design/humans/pause.md",
+     "start": 27,
+     "end": 41,
+     "title": "humans › pause › Pause, continue and stop › Stop"
+    },
+    {
+     "path": "docs/adr/0205-stop-makes-an-order-s-brewing-batches-stuck-at-once-and-retry-continues-them.md",
+     "start": 12,
+     "end": 17,
+     "title": "ADR 0205 › `stop` makes an order's brewing batches Stuck at once, and `retry` continues them › Decision › The command"
+    },
+    {
+     "path": "docs/adr/0202-pause-and-continue-hold-an-order-or-the-whole-brewery-at-its-next-convenient-point.md",
+     "start": 5,
+     "end": 12,
+     "title": "ADR 0202 › `pause` and `continue` hold an order, or the whole Brewery, at its next convenient point › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference on both commands (pause lets running attempts end at their next convenient point until `continue`; stop makes each brewing batch Stuck `stopped`, abandons its attempts, and `retry` continues from the same step), and every claim is stated in the cited passages."
+   }
+  },
+  {
+   "id": "design-06",
+   "kind": "design",
+   "question": "If Claude runs out of my subscription allowance halfway through a job, does the job fail?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "No, the job does not fail in that case. The engine holds the brewer attempts that the limit covers until the window reopens, then goes on by itself after the reset [2][3]. The attempt is scheduled again without counting against any retry, so it does not go Stuck as ADR 0091 first specified [2][3]. The hold depends on the limit's scope: a session or weekly limit holds every brewer, while an Opus or Sonnet limit holds only brewers on that model family [2][3]. The reset is read in the machine's time zone with a 5-minute margin, and an unreadable reset is tried again once an hour [2]. The passages do not say what happens to work the interrupted attempt had already done [2][3].",
+   "passages": [
+    {
+     "path": "docs/adr/0091-a-run-out-usage-window-blocks-on-the-environment.md",
+     "start": 5,
+     "end": 15,
+     "title": "ADR 0091 › A run-out usage window blocks on the environment › Context"
+    },
+    {
+     "path": "docs/adr/0206-a-run-out-usage-window-holds-every-brewer-attempt-until-it-reopens.md",
+     "start": 5,
+     "end": 12,
+     "title": "ADR 0206 › A run-out usage window holds every brewer attempt until it reopens › Context"
+    },
+    {
+     "path": "docs/design/engine/usage-window.md",
+     "start": 1,
+     "end": 15,
+     "title": "engine › usage-window › The usage window"
+    },
+    {
+     "path": "docs/adr/0091-a-run-out-usage-window-blocks-on-the-environment.md",
+     "start": 27,
+     "end": 39,
+     "title": "ADR 0091 › A run-out usage window blocks on the environment › Decision › How the attempt ends"
+    },
+    {
+     "path": "docs/adr/0129-a-spend-limit-or-a-too-low-credit-balance-blocks-on-the-environment.md",
+     "start": 33,
+     "end": 47,
+     "title": "ADR 0129 › A spend limit or a too-low credit balance blocks on the environment › Decision › How the attempt ends"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer says the job does not fail, the engine holds the attempts until the window reopens and continues itself, and the step is rescheduled without counting a retry, matching the reference; it omits the spend-limit contrast but that is not what was asked, and it gives the current rule over ADR 0091's Stuck behavior."
+   }
+  },
+  {
+   "id": "design-07",
+   "kind": "design",
+   "question": "What does the Finer do, and where does it run in the Nip recipe?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "The Finer is the default brewer that simplifies a batch's change and commits it before the checks and reviews read it, looking for duplication, dead code, needless indirection and over-general code [3]. It edits only files the change already touches, and it leaves alone the red step's test lines, the base's test files, dependency and CI files, error messages, output formats and public interfaces [3]. Before committing, it runs the repository's format, lint, typecheck and the tests covering its changes [5]. In the Nip recipe it runs as `{ \"id\": \"fine\", \"brewer\": \"finer\" }` between `implement` and `green` [1][4]. If green fails, the route still goes back to `implement`, and the Finer then runs again on the fixed change; its out doc lists its changes or says `unchanged` with a reason, and a `done` with `unchanged` and no commit succeeds [1][4].",
+   "passages": [
+    {
+     "path": "docs/adr/0166-the-finer-simplifies-a-batch-s-change-before-green.md",
+     "start": 39,
+     "end": 43,
+     "title": "ADR 0166 › The Finer simplifies a batch's change before green, and may end done without a commit › Decision › In the recipes"
+    },
+    {
+     "path": "docs/adr/0166-the-finer-simplifies-a-batch-s-change-before-green.md",
+     "start": 49,
+     "end": 54,
+     "title": "ADR 0166 › The Finer simplifies a batch's change before green, and may end done without a commit › Consequences"
+    },
+    {
+     "path": "docs/design/recipes/fining.md",
+     "start": 1,
+     "end": 8,
+     "title": "recipes › fining › Fining"
+    },
+    {
+     "path": "docs/design/recipes/fining.md",
+     "start": 9,
+     "end": 13,
+     "title": "recipes › fining › Fining"
+    },
+    {
+     "path": "docs/adr/0166-the-finer-simplifies-a-batch-s-change-before-green.md",
+     "start": 23,
+     "end": 24,
+     "title": "ADR 0166 › The Finer simplifies a batch's change before green, and may end done without a commit › Decision › The Finer"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer states the Finer simplifies and commits before checks and reviews, and runs as `fine` between `implement` and `green`, matching the reference; the extra details are all stated in passages [1], [3], [4] and [5]."
+   }
+  },
+  {
+   "id": "design-08",
+   "kind": "design",
+   "question": "What does a test-first recipe's red proof need from the repository, and what happens if it is missing?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "A red proof now needs a test map, not a test report: ADR 0297 amends ADR 0017 on this point and replaces ADR 0078's Stuck start for a repository without `testReport` [4][1][3]. If the Brewery keeps the map and has no `test-maps/<owner>/<name>.jsonc`, the batch is Stuck (`environment`) before any brewer runs, with or without a survey step [2][4]. If the repository keeps the map and has no `.foedrum/test-map.jsonc`, in a recipe with no survey step (or one whose `when` skips it), the batch is Stuck before its first step, with the message to commit the map or add a survey step, and the recipe still loads [2][4]. A map that cannot be read is not refused at that point; the red proof's existing Stuck names the problem [4]. Committing the map and retrying clears the Stuck, because the driver reads the map at the commit `refusalCommit` names, though the batch's start remains its first attempt's until one succeeds [4].",
+   "passages": [
+    {
+     "path": "docs/adr/0017-test-first-recipes-and-tasting-lenses.md",
+     "start": 12,
+     "end": 17,
+     "title": "ADR 0017 › Test-first recipes and tasting lenses › Decision › Test-first is a recipe structure, not an instruction"
+    },
+    {
+     "path": "docs/design/checks/red-proof.md",
+     "start": 8,
+     "end": 13,
+     "title": "checks › red-proof › The red proof"
+    },
+    {
+     "path": "docs/adr/0078-the-red-proof-reads-the-test-report-and-testsunchanged-compares-lines.md",
+     "start": 38,
+     "end": 39,
+     "title": "ADR 0078 › The red proof reads the test report, and testsUnchanged compares the lines of the tests › Decision › A repository without a test report stops the batch at its start"
+    },
+    {
+     "path": "docs/adr/0297-the-red-proof-reads-a-test-map-only-and-a-test-first-batch-with-none-is-stuck-before-its-first-step.md",
+     "start": 18,
+     "end": 22,
+     "title": "ADR 0297 › The red proof reads a test map only, and a test-first batch with none is Stuck before its first step › Decision"
+    },
+    {
+     "path": "docs/adr/0064-test-first-recipes-when-onblocked-and-a-red-proof-required.md",
+     "start": 14,
+     "end": 20,
+     "title": "ADR 0064 › Test-first recipes reach the engine: when, onBlocked rounds, and a red proof required › Decision › A test-first recipe needs a red proof, for good"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer names the test map need, both locations' Stuck (environment) before any brewer runs, and the survey exception when the repository keeps its own map, all stated in passages 2 and 4; it also gives the current rule over the older test-report one."
+   }
+  },
+  {
+   "id": "design-09",
+   "kind": "design",
+   "question": "When Foedrum runs tests that an AI wrote, can that code reach the internet or my home folder?",
+   "paraphrased": true,
+   "sourceHit": false,
+   "answer": "Since ADR 0076, which amends ADR 0069's unsandboxed running of checks, a check's command on macOS and on Linux or WSL2 runs in a sandbox of Foedrum's own with no network, so ADR 0069's earlier network and home-folder reach no longer holds [3][4][2][1]. The check-sandbox test asserts that a setup, which keeps the network, still cannot read a file in the home folder or write outside its worktree [5], and on macOS a check may stat folders above its worktree in the home folder [3][4]. On native Windows there is no sandbox for shell commands, so a check's command can reach the network and the home folder, and each reading of such a command is marked `\"unsandboxed\": true` [3]. Where the Brewery requires the `sandboxed` level and has a check step, `foedrum serve` refuses to start below that level [3]. The passages do not say what a check does on Linux where bubblewrap does not work, beyond the check-sandbox test skipping there [5].",
+   "passages": [
+    {
+     "path": "docs/adr/0069-check-steps-run-the-repositorys-commands-in-an-attempt-of-their-own.md",
+     "start": 48,
+     "end": 55,
+     "title": "ADR 0069 › Check steps run the repository's commands in an attempt of their own › Consequences"
+    },
+    {
+     "path": "docs/adr/0069-check-steps-run-the-repositorys-commands-in-an-attempt-of-their-own.md",
+     "start": 18,
+     "end": 19,
+     "title": "ADR 0069 › Check steps run the repository's commands in an attempt of their own › Decision › A check step is an attempt, run by the check runner"
+    },
+    {
+     "path": "docs/adr/0076-check-steps-run-in-an-os-sandbox-with-no-network.md",
+     "start": 29,
+     "end": 30,
+     "title": "ADR 0076 › Check steps run in an OS sandbox of Foedrum's own, with no network › Decision › Where it runs"
+    },
+    {
+     "path": "docs/adr/0076-check-steps-run-in-an-os-sandbox-with-no-network.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0076 › Check steps run in an OS sandbox of Foedrum's own, with no network › Context"
+    },
+    {
+     "path": "docs/adr/0158-a-repository-s-setup-runs-in-the-check-sandbox-with-the-network-kept.md",
+     "start": 57,
+     "end": 58,
+     "title": "ADR 0158 › A repository's setup runs in the check sandbox, with the network kept › Consequences"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer correctly gives the no-network sandbox on macOS, Linux and WSL2 and the unsandboxed native Windows reading, but it says the passages do not cover what happens when the sandbox cannot start, whereas the reference says the check is not run."
+   }
+  },
+  {
+   "id": "design-10",
+   "kind": "design",
+   "question": "Will my laptop doze off while Foedrum is in the middle of a job?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Yes, while at least one brewer or check-step attempt of `brew` or `serve` is running, Foedrum holds off the idle timer, and it lets go one minute after the last attempt ends unless another starts within that minute [1][2]. On Windows, a helper calls `SetThreadExecutionState` with `ES_SYSTEM_REQUIRED`, and `powercfg /requests` lists it under SYSTEM [4]. On macOS, the hold is `caffeinate -i`, and on Linux it is a `systemd-inhibit` idle lock, which needs systemd; where systemd does not run there is no mechanism, and on other platforms nothing starts and the machine sleeps as before [4]. The display may still turn off, the machine still sleeps when you ask it to, when the lid closes, or on a critical battery, and the hold stays on battery [1][2]. It is on by default, and `\"keepAwake\": false` in `foedrum.jsonc` or `.foedrum/local.jsonc` turns it off, with the local file winning [1][2].",
+   "passages": [
+    {
+     "path": "docs/adr/0195-brew-and-serve-keep-the-machine-awake-while-an-attempt-runs.md",
+     "start": 12,
+     "end": 17,
+     "title": "ADR 0195 › `brew` and `serve` keep the machine awake while an attempt runs › Decision › When"
+    },
+    {
+     "path": "docs/design/platform/keep-awake.md",
+     "start": 1,
+     "end": 8,
+     "title": "platform › keep-awake › Keeping the machine awake"
+    },
+    {
+     "path": "docs/adr/0195-brew-and-serve-keep-the-machine-awake-while-an-attempt-runs.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0195 › `brew` and `serve` keep the machine awake while an attempt runs › Context"
+    },
+    {
+     "path": "docs/adr/0195-brew-and-serve-keep-the-machine-awake-while-an-attempt-runs.md",
+     "start": 19,
+     "end": 25,
+     "title": "ADR 0195 › `brew` and `serve` keep the machine awake while an attempt runs › Decision › How"
+    },
+    {
+     "path": "docs/adr/0195-brew-and-serve-keep-the-machine-awake-while-an-attempt-runs.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0195 › `brew` and `serve` keep the machine awake while an attempt runs"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference on the idle-timer hold, the one-minute release, the display, sleep-on-request, lid and critical battery exceptions, the keepAwake false switch, and the helper and systemd caveats, and every claim is stated in the cited passages."
+   }
+  },
+  {
+   "id": "design-11",
+   "kind": "design",
+   "question": "How are the engine's invariants tested, and how do I reproduce a failing run?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Property tests generate engine scenarios that run through `decide`, the guard, the fold, the supervisor and a fake brewer runner on an in-memory store, with one property per invariant in `test/property/` [1]. Chaos tests play engine scenarios against the real driver on a SQLite file, kill it at random points, restart it on the same file, and check invariants I1–I6 after every move [4]. Each run starts from a fresh seed, and `FOEDRUM_RUNS` sets how many seeds run: few in `npm run check`, 500 per pull request on CI's Linux leg, and 1,000 in the nightly run [1]. Chaos runs use 5 seeds in `npm run check`, 200 per pull request, and 1,000 nightly [2]. To reproduce a failing property run, use the seed it reports, since a failure is shrunk and reported with its seed, moves and events, and setting `FOEDRUM_SEED` to that seed replays it [1]; a chaos failure names its seed the same way, and a recorded run replays with the same events and kills [2].",
+   "passages": [
+    {
+     "path": "docs/design/testing/property.md",
+     "start": 1,
+     "end": 7,
+     "title": "testing › property › Property tests"
+    },
+    {
+     "path": "docs/adr/0033-chaos-tests-effects-found-by-key-and-leases-at-start.md",
+     "start": 32,
+     "end": 33,
+     "title": "ADR 0033 › Chaos tests: effects found by their key, and a driver's leases at its start › Decision › Kills in the chaos harness"
+    },
+    {
+     "path": "docs/design/engine/invariants.md",
+     "start": 1,
+     "end": 11,
+     "title": "engine › invariants › Invariants"
+    },
+    {
+     "path": "docs/milestones/m0.md",
+     "start": 35,
+     "end": 47,
+     "title": "milestones › m0 › M0 — Foundations: what it built › The exit criterion"
+    },
+    {
+     "path": "docs/milestones/m0.md",
+     "start": 68,
+     "end": 79,
+     "title": "milestones › m0 › M0 — Foundations: what it built › Not in M0"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference (seeded generated scenarios through decide, guard, fold, supervisor on an in-memory store, one property per invariant, failure shrunk and reported with seed, replayed via FOEDRUM_SEED) and its additional chaos-test and run-count details are all stated in passages 1, 2 and 4."
+   }
+  },
+  {
+   "id": "design-12",
+   "kind": "design",
+   "question": "Which part of the system is responsible for stopping an agent from touching files, network or credentials outside the folder it works in?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "The owner for this risk is Claude Code's sandbox, together with the attempt settings Foedrum writes for it, which covers files, network, credentials and the clone's git settings [1]. On macOS, Linux and WSL2, the sandbox disallows unsandboxed commands, limits reads to the working directories, git's global configuration, parts of `~/.claude` and the toolchain folders on the driver's PATH, limits writes to the worktree, and limits network to an allowlist [2]. ADR 0162 amends ADR 0160 by re-opening those toolchain folders for reads, and ADR 0160 amends ADR 0087 for what a sandboxed command can read [2][3]. On native Windows there is no sandbox: the protections are strict tool allowlists, file-tool rules scoped to the worktree, a minimal environment and a `scope` guard, and a warning is shown at start [2]. An optional container, on any OS with Podman or Docker, mounts only the worktree [2].",
+   "passages": [
+    {
+     "path": "docs/trust-boundaries.md",
+     "start": 1,
+     "end": 9,
+     "title": "trust-boundaries › Who guards what"
+    },
+    {
+     "path": "docs/design/platform/isolation.md",
+     "start": 6,
+     "end": 10,
+     "title": "platform › isolation › Isolation levels"
+    },
+    {
+     "path": "docs/adr/0160-sandboxed-commands-read-only-inside-the-working-directories.md",
+     "start": 31,
+     "end": 34,
+     "title": "ADR 0160 › Sandboxed commands read only inside the working directories › Decision › The block on the sandboxed level"
+    },
+    {
+     "path": "docs/adr/0049-reviewers-read-only-inside-the-checkout.md",
+     "start": 20,
+     "end": 22,
+     "title": "ADR 0049 › Reviewers read only inside the checkout: a read guard for the read-only agents, scoped rules for brewers › Decision › The read guard"
+    },
+    {
+     "path": "docs/adr/0158-a-repository-s-setup-runs-in-the-check-sandbox-with-the-network-kept.md",
+     "start": 57,
+     "end": 58,
+     "title": "ADR 0158 › A repository's setup runs in the check sandbox, with the network kept › Consequences"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer names Claude Code's sandbox with the attempt settings Foedrum writes as the owner, matching the reference, and its added detail on isolation levels, ADRs and the container is stated in passages [1]-[3]; it only omits the `..`/link denial example."
+   }
+  },
+  {
+   "id": "why-01",
+   "kind": "why",
+   "question": "Why is Foedrum written in TypeScript rather than plain JavaScript or Python?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Foedrum's core is a state machine whose correctness depends on handling every state and step outcome, and the Claude, GitHub and command-line tooling ecosystem is strongest in TypeScript and Python [1]. Plain JavaScript was rejected because it has no compile-time exhaustiveness checks, which would lose the main stability tool [3]. Python was rejected because it is strong for evaluation work but weaker for a cross-platform CLI with a live web dashboard, and it would mean two runtimes for users [3]. TypeScript runs under Node's built-in type stripping with `strict` settings and no bundler, `tsx` or `esbuild`, so the project keeps as few build tools as possible [1][2][3].",
+   "passages": [
+    {
+     "path": "docs/adr/0001-typescript-on-node.md",
+     "start": 5,
+     "end": 6,
+     "title": "ADR 0001 › TypeScript, run by Node's built-in type stripping › Context"
+    },
+    {
+     "path": "docs/adr/0001-typescript-on-node.md",
+     "start": 8,
+     "end": 13,
+     "title": "ADR 0001 › TypeScript, run by Node's built-in type stripping › Decision"
+    },
+    {
+     "path": "docs/adr/0001-typescript-on-node.md",
+     "start": 20,
+     "end": 23,
+     "title": "ADR 0001 › TypeScript, run by Node's built-in type stripping › Alternatives considered"
+    },
+    {
+     "path": "docs/adr/0023-language-independent-recipes.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0023 › Default recipes are language-independent › Context"
+    },
+    {
+     "path": "README.md",
+     "start": 60,
+     "end": 69,
+     "title": "README › Why Foedrum"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer covers the state-machine rationale, JavaScript's lack of compile-time exhaustiveness checks, and Python's weaker fit with two runtimes, all stated in passages [1] and [3]; the added Node type-stripping detail is supported by [1][2][3]."
+   }
+  },
+  {
+   "id": "why-02",
+   "kind": "why",
+   "question": "Why is the code under a license that makes people share their changes, and why do contributors have to sign an agreement?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Foedrum is under the AGPL-3.0 so that it stays genuine open source, usable by individuals and inside companies, while preventing closed commercial resale, especially offering a modified Foedrum as a hosted service without sharing the changes [3][1]. Anyone may use, modify and run Foedrum, including commercially, but whoever offers a modified version to others, including over a network, must publish their source under the AGPL [4]. Internal use of an unmodified or privately modified Foedrum is unaffected by that sharing requirement [4]. Contributors sign a Contributor License Agreement so the project can later relicense or offer a commercial licence alongside the AGPL [1]. The CLA must be in place before external contributions are accepted, and its details will be published before the project opens to contributions [4][2].",
+   "passages": [
+    {
+     "path": "docs/adr/0009-agpl-and-cla.md",
+     "start": 8,
+     "end": 11,
+     "title": "ADR 0009 › AGPL-3.0 with a Contributor License Agreement › Decision"
+    },
+    {
+     "path": "README.md",
+     "start": 90,
+     "end": 96,
+     "title": "README › Licence"
+    },
+    {
+     "path": "docs/adr/0009-agpl-and-cla.md",
+     "start": 5,
+     "end": 6,
+     "title": "ADR 0009 › AGPL-3.0 with a Contributor License Agreement › Context"
+    },
+    {
+     "path": "docs/adr/0009-agpl-and-cla.md",
+     "start": 13,
+     "end": 17,
+     "title": "ADR 0009 › AGPL-3.0 with a Contributor License Agreement › Consequences"
+    },
+    {
+     "path": "docs/adr/0009-agpl-and-cla.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0009 › AGPL-3.0 with a Contributor License Agreement"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference on both the AGPL rationale (open source but preventing closed hosted resale) and the CLA's purpose (later relicensing or commercial licence), and every claim is stated in the cited passages."
+   }
+  },
+  {
+   "id": "why-03",
+   "kind": "why",
+   "question": "Why does the process runner kill a process that writes too much output instead of just keeping part of it?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Keeping only part of the output and letting the process run on was rejected: a caller that parses stdout would read cut-off text that looks whole unless it also checked a flag, and a writer without end would keep a CPU busy until its deadline, or forever without one [3]. The runner instead kills the process tree at the limit, and a killed process has no exit code, which every caller already treats as a failure, so cut output never passes as complete [2]. The kill also bounds the runner's memory for every caller, with or without a deadline, and stops a runaway writer at once [2][1]. This was needed because commands run against untrusted repository content can write far more than any caller needs, and a call without a `timeoutMs` has no deadline at all; a measured node writer once made the runner throw an uncaught `RangeError` on Windows, which could have crashed the engine, the gate or the SessionStart cleanup [4]. A caller whose legitimate output exceeds the 4 MiB default must pass a larger `maxOutputBytes` or read the output as a stream [2].",
+   "passages": [
+    {
+     "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+     "start": 12,
+     "end": 16,
+     "title": "ADR 0035 › The process runner kills a process at an output limit › Decision"
+    },
+    {
+     "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+     "start": 18,
+     "end": 22,
+     "title": "ADR 0035 › The process runner kills a process at an output limit › Consequences"
+    },
+    {
+     "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+     "start": 24,
+     "end": 28,
+     "title": "ADR 0035 › The process runner kills a process at an output limit › Alternatives considered"
+    },
+    {
+     "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0035 › The process runner kills a process at an output limit › Context"
+    },
+    {
+     "path": "docs/adr/0046-only-the-runners-settings-the-init-check-and-a-line-by-line-stream.md",
+     "start": 50,
+     "end": 57,
+     "title": "ADR 0046 › Only the runner's settings, the init check, and a stream read line by line › Decision › Reading the stream line by line"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer covers the reference points (unbounded holding, untrusted content, RangeError crash, bounded memory, immediate stop, null exit code never mistaken for complete output, partial-keep alternatives rejected) and each claim is supported by the cited passages; the 4 MiB mention is also in the passages, though the answer does not state the limit as the kill threshold explicitly."
+   }
+  },
+  {
+   "id": "why-04",
+   "kind": "why",
+   "question": "Why don't the commits the AI agents make carry a line crediting the AI tool that wrote them?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Foedrum's brewers run `claude` with `--setting-sources \"\"` and the runner's own settings file, so Claude Code's default attribution, which adds a `Co-Authored-By: Claude <model>` trailer, applies to them [2]. A brewer's commits land in a target repository whose history belongs to the team that owns it, and Foedrum stays neutral about the tools behind it (#401), so `attemptSettings` writes `\"attribution\": { \"commit\": \"\", \"pr\": \"\", \"sessionUrl\": false }` on every isolation level [2][1]. It uses empty strings rather than `\"attribution\": false` because the reference says older Claude Code versions reject `false` and skip the whole settings file, which would silently drop the brewer's deny rules [1]. A measurement with Claude Code 2.1.301 confirmed the effect: the default produced the trailer, and the empty-string object did not [2]. Leaving the default was rejected because every commit would advertise the tool, a choice the repository's owner did not make [3], and commits made before the change keep their trailer because history is not rewritten [4].",
+   "passages": [
+    {
+     "path": "docs/adr/0151-brewers-write-no-attribution.md",
+     "start": 10,
+     "end": 13,
+     "title": "ADR 0151 › Brewers write no attribution › Decision"
+    },
+    {
+     "path": "docs/adr/0151-brewers-write-no-attribution.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0151 › Brewers write no attribution › Context"
+    },
+    {
+     "path": "docs/adr/0151-brewers-write-no-attribution.md",
+     "start": 20,
+     "end": 22,
+     "title": "ADR 0151 › Brewers write no attribution › Alternatives considered"
+    },
+    {
+     "path": "docs/adr/0151-brewers-write-no-attribution.md",
+     "start": 15,
+     "end": 18,
+     "title": "ADR 0151 › Brewers write no attribution › Consequences"
+    },
+    {
+     "path": "docs/adr/0088-out-doc-text-that-looks-like-a-secret-is-left-out-of-the-pull-request-and-the-status-comment.md",
+     "start": 16,
+     "end": 17,
+     "title": "ADR 0088 › Out doc text that looks like a secret is left out of the pull request and the status comment › Decision"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives the reference's reasons (the target repo's history belongs to its owning team, Foedrum stays neutral about tools, empty strings rather than false because older versions skip the whole settings file and its deny rules), and every claim is stated in the cited passages."
+   }
+  },
+  {
+   "id": "why-05",
+   "kind": "why",
+   "question": "Why do brewers run claude with its auto-updater and nonessential traffic disabled?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Brewers run this way because in the fourth brew (batch `9-1`, #442), `claude.exe` updated itself from 2.1.301 to 2.1.310 mid-brew, even though the user's own sessions ran with `DISABLE_AUTOUPDATER=1`. Brewers read no user settings, and none of the runner's variables stopped the background updater [4]. The binary is the user's own, so a brewer's update changed the claude every session on the machine runs, and the version Foedrum's stream contract was checked against [4]. ADR 0177 therefore adds `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` to the runner's forced layer, which goes last so neither the base nor a brewer's `env` can replace them [1]. The second variable also turns off telemetry, error reporting and feature-flag fetching, which an attempt does not need and which could change claude's behaviour between attempts of one brew [1][5]. The rejected alternatives were setting `DISABLE_AUTOUPDATER` alone, reading the user's settings for their `env`, and pinning the version in doctor, since a check only finds a change after it happens [5].",
+   "passages": [
+    {
+     "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+     "start": 19,
+     "end": 32,
+     "title": "ADR 0177 › Brewers run without claude's auto-updater and nonessential traffic › Decision"
+    },
+    {
+     "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+     "start": 12,
+     "end": 17,
+     "title": "ADR 0177 › Brewers run without claude's auto-updater and nonessential traffic › Context"
+    },
+    {
+     "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+     "start": 34,
+     "end": 39,
+     "title": "ADR 0177 › Brewers run without claude's auto-updater and nonessential traffic › Consequences"
+    },
+    {
+     "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0177 › Brewers run without claude's auto-updater and nonessential traffic › Context"
+    },
+    {
+     "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+     "start": 47,
+     "end": 50,
+     "title": "ADR 0177 › Brewers run without claude's auto-updater and nonessential traffic › Alternatives considered"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer covers the mid-brew update from 2.1.301 to 2.1.310, no user settings read, the shared binary and stream contract version, and the telemetry/error/feature-flag reasoning, all stated in passages [1], [4] and [5]."
+   }
+  },
+  {
+   "id": "why-06",
+   "kind": "why",
+   "question": "My machine has an older git and Foedrum refuses to start; why does it insist on a newer one?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Foedrum now requires git 2.38 because its base check of open pull requests runs `git merge-tree --write-tree`, which arrived in git 2.38, and below that version the check was skipped [3]. Skipping it on some machines but not others was treated as a gap in what an open pull request is told, and git 2.38 was judged old enough to require [3]. The earlier minimum of 2.31 is still the reason for the forced git configuration, since git 2.38 also reads those variables, but ADR 0200 amends ADR 0109 to raise the doctor requirement to 2.38.0 [1][2]. `foedrum doctor` reports an older git as a required problem, and `foedrum serve` does not start with any required problem, so an older git stops it [1][5]. Its message names the version found and the one needed, with the advice \"install git 2.38.0 or later\" [1].",
+   "passages": [
+    {
+     "path": "docs/adr/0200-foedrum-requires-git-2-38.md",
+     "start": 12,
+     "end": 14,
+     "title": "ADR 0200 › Foedrum requires git 2.38 › Decision"
+    },
+    {
+     "path": "docs/adr/0109-a-brewer-s-git-holds-no-push-credential.md",
+     "start": 35,
+     "end": 40,
+     "title": "ADR 0109 › A brewer's git holds no push credential › Decision › The forced variables"
+    },
+    {
+     "path": "docs/adr/0200-foedrum-requires-git-2-38.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0200 › Foedrum requires git 2.38 › Context"
+    },
+    {
+     "path": "docs/adr/0200-foedrum-requires-git-2-38.md",
+     "start": 16,
+     "end": 20,
+     "title": "ADR 0200 › Foedrum requires git 2.38 › Consequences"
+    },
+    {
+     "path": "docs/design/intake/open-pull-requests.md",
+     "start": 62,
+     "end": 65,
+     "title": "intake › open-pull-requests › Open pull requests"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives the reference's reasons (merge-tree --write-tree arrived in git 2.38, the silent skip on older git, and the age of 2.38) and adds the doctor/serve refusal, all stated in the cited passages."
+   }
+  },
+  {
+   "id": "why-07",
+   "kind": "why",
+   "question": "Why are the design docs written with a line break after every sentence, even mid-paragraph?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "The design docs put one sentence on each line, even mid-paragraph, as a rule for every page under `docs/design/` [1]. The rendered page looks the same, but git merges line by line, so edits to different sentences no longer conflict [1][2]. The problem it fixes is that the old `docs/architecture.md` was mostly one paragraph per line, so two pull requests changing different sentences of one paragraph always conflicted [2]. On 2026-10-22 that file changed in 74 commits and caused most of the day's merge conflicts [2]. Under the new layout, two pull requests conflict in the docs only when they change the same sentence [5].",
+   "passages": [
+    {
+     "path": "docs/adr/0149-docs-layout-a-map-and-one-page-per-concept.md",
+     "start": 12,
+     "end": 24,
+     "title": "ADR 0149 › Docs layout: a map, and one page per concept under docs/design/ › Decision"
+    },
+    {
+     "path": "docs/adr/0149-docs-layout-a-map-and-one-page-per-concept.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0149 › Docs layout: a map, and one page per concept under docs/design/ › Context"
+    },
+    {
+     "path": "docs/adr/0167-a-brewed-pull-request-follows-one-layout-and-opens-as-a-draft-unless-every-taster-approves.md",
+     "start": 34,
+     "end": 34,
+     "title": "ADR 0167 › A brewed pull request follows one layout, and opens as a draft unless every Taster approves › Decision › The engine builds the body"
+    },
+    {
+     "path": "docs/adr/0183-the-engine-s-fixed-rules-for-a-brewer-go-in-an-appended-system-prompt.md",
+     "start": 64,
+     "end": 69,
+     "title": "ADR 0183 › The engine's fixed rules for a brewer go in an appended system prompt › Consequences"
+    },
+    {
+     "path": "docs/adr/0149-docs-layout-a-map-and-one-page-per-concept.md",
+     "start": 29,
+     "end": 33,
+     "title": "ADR 0149 › Docs layout: a map, and one page per concept under docs/design/ › Consequences"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference: git merges line by line, the old architecture.md's one-paragraph-per-line caused most of a day's conflicts, and one sentence per line renders the same while letting edits to different sentences merge, all stated in passages 1, 2 and 5."
+   }
+  },
+  {
+   "id": "why-08",
+   "kind": "why",
+   "question": "Why does a public pull request not name its sibling pull request in a private repository?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "A public pull request does not name a private sibling because the sibling's name would otherwise appear in a public body. Before ADR 0300, a public pull request could show `acme/internal-billing#12`, which revealed the private repository's name and that a pull request of this change existed there, a known risk the maintainer accepted for ADR 0292 [5]. ADR 0300 amends ADR 0292's sibling section so that a sibling is named only where its repository's audience covers the pull request's audience, and a private sibling is named only in a private pull request [1][2]. A public pull request therefore shows a hidden sibling only by its place in the merge order, as `pull request <n> (in a private repository)`, so the repository is never named [1][3]. Visibility is the code host's fact that Foedrum takes as an argument rather than recording as state [2].",
+   "passages": [
+    {
+     "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+     "start": 30,
+     "end": 36,
+     "title": "ADR 0300 › A public pull request names a sibling in a private repository by its place only › Decision"
+    },
+    {
+     "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+     "start": 19,
+     "end": 28,
+     "title": "ADR 0300 › A public pull request names a sibling in a private repository by its place only › Decision"
+    },
+    {
+     "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+     "start": 38,
+     "end": 44,
+     "title": "ADR 0300 › A public pull request names a sibling in a private repository by its place only › Consequences"
+    },
+    {
+     "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0300 › A public pull request names a sibling in a private repository by its place only"
+    },
+    {
+     "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+     "start": 5,
+     "end": 11,
+     "title": "ADR 0300 › A public pull request names a sibling in a private repository by its place only › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives the same core reason as the reference (naming reveals the private repo's name and that it has a PR of this change) and says a hidden sibling appears by its place in the merge order; every claim is supported by passages [1]-[3] and [5]."
+   }
+  },
+  {
+   "id": "why-09",
+   "kind": "why",
+   "question": "Why can't I start work on the same issue again while its change is still waiting to be merged?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Ordering the issue again is refused while its Brewery issue is on tap and has a pull request with no recorded end, so that an issue has one live batch [3]. This replaces the earlier rule that let a batch on tap count as ended: a second order during an open pull request could send the older batch back to brewing behind the later one [1][3]. Ordering again is therefore governed by ADR 0339, which amends ADR 0105 on when a Brewery issue on tap can be ordered again [1][3]. A merged or closed pull request has a recorded end, and an issue with no pull request, such as an approved plan, can still be ordered again [3]. To order it again while the change is open, close the pull request first [4].",
+   "passages": [
+    {
+     "path": "docs/adr/0339-an-issue-has-one-live-batch-no-second-batch-while-its-pull-request-is-open.md",
+     "start": 5,
+     "end": 14,
+     "title": "ADR 0339 › An issue has one live batch: no second batch on a Brewery issue while its pull request is open › Context"
+    },
+    {
+     "path": "docs/adr/0043-target-repository-issues-as-a-work-queue-claimed-by-a-ref.md",
+     "start": 5,
+     "end": 12,
+     "title": "ADR 0043 › Target-repository issues as a work queue, claimed by a ref › Context"
+    },
+    {
+     "path": "docs/adr/0339-an-issue-has-one-live-batch-no-second-batch-while-its-pull-request-is-open.md",
+     "start": 18,
+     "end": 23,
+     "title": "ADR 0339 › An issue has one live batch: no second batch on a Brewery issue while its pull request is open › Decision › The rule"
+    },
+    {
+     "path": "docs/adr/0339-an-issue-has-one-live-batch-no-second-batch-while-its-pull-request-is-open.md",
+     "start": 50,
+     "end": 54,
+     "title": "ADR 0339 › An issue has one live batch: no second batch on a Brewery issue while its pull request is open › Consequences"
+    },
+    {
+     "path": "docs/design/intake/target-issues.md",
+     "start": 56,
+     "end": 58,
+     "title": "intake › target-issues › Target-repository issues: a work queue"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives the refusal rule, the failed-check mechanism, and the close-the-PR remedy, but omits the wrong-batch run (brew brewed the later batch and reported success) and the point that a number always reaches its one live batch."
+   }
+  },
+  {
+   "id": "why-10",
+   "kind": "why",
+   "question": "Why must every recipe declare a required type, mash or brew?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "A type tells the wrong kind of recipe apart: it catches the wrong kind of recipe, not the wrong size [2]. Making the type optional, defaulting to `brew`, was rejected because a Brewery's own planning recipe would silently count as building, which is the gap this record closes [5]. A recipe file without a type is refused when it loads, with a line that names the file and says to add `\"type\": \"mash\"` or `\"type\": \"brew\"` [1][2]. The type also decides what each step is offered and what counts as planning, so `PLANNING_RECIPES` is gone and a plan lens is offered only the `brew` recipes [1]. A type arrives with the first recipe that uses it, and there is no placeholder [1][2].",
+   "passages": [
+    {
+     "path": "docs/adr/0365-a-recipe-has-a-type-mash-or-brew.md",
+     "start": 13,
+     "end": 23,
+     "title": "ADR 0365 › A recipe has a type, mash or brew › Decision"
+    },
+    {
+     "path": "docs/design/recipes/recipes.md",
+     "start": 65,
+     "end": 72,
+     "title": "recipes › recipes › Recipes"
+    },
+    {
+     "path": "docs/adr/0365-a-recipe-has-a-type-mash-or-brew.md",
+     "start": 40,
+     "end": 48,
+     "title": "ADR 0365 › A recipe has a type, mash or brew › Migration"
+    },
+    {
+     "path": "docs/adr/0365-a-recipe-has-a-type-mash-or-brew.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0365 › A recipe has a type, mash or brew"
+    },
+    {
+     "path": "docs/adr/0365-a-recipe-has-a-type-mash-or-brew.md",
+     "start": 50,
+     "end": 54,
+     "title": "ADR 0365 › A recipe has a type, mash or brew › Alternatives considered"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives the required-not-defaulted rationale correctly, but omits the core reason that the fixed list of three names missed a Brewery's own planning recipe and the Innkeeper told planning from building only by descriptions."
+   }
+  },
+  {
+   "id": "amended-01",
+   "kind": "amended",
+   "question": "Can I put comments and trailing commas in the frontmatter of a brewer file or an out doc?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Yes. All frontmatter, including brewers and out docs, is read with the JSONC reader, so comments and trailing commas are allowed [1][2]. ADR 0020 amends ADR 0007, which had expected strict parsing for frontmatter, so the current rule is JSONC [1][4][5]. Comments do not skip validation: every frontmatter object is still checked against its zod schema, and unknown brewer fields are rejected [1][2][3]. Foedrum's own `defaults/` brewers stay strict JSON because GitHub reads frontmatter as YAML and shows an error for a comment [3]. Frontmatter is also limited to 64 nesting levels and 1 MiB for the whole file, body included, and a violation raises a `ParseError` [1].",
+   "passages": [
+    {
+     "path": "docs/adr/0020-jsonc-frontmatter.md",
+     "start": 10,
+     "end": 14,
+     "title": "ADR 0020 › Frontmatter is read as JSONC › Decision"
+    },
+    {
+     "path": "docs/adr/0020-jsonc-frontmatter.md",
+     "start": 16,
+     "end": 20,
+     "title": "ADR 0020 › Frontmatter is read as JSONC › Consequences"
+    },
+    {
+     "path": "docs/design/recipes/brewers.md",
+     "start": 1,
+     "end": 8,
+     "title": "recipes › brewers › Brewers"
+    },
+    {
+     "path": "docs/adr/0007-jsonc-config-and-json-frontmatter.md",
+     "start": 8,
+     "end": 12,
+     "title": "ADR 0007 › JSONC configuration, JSON frontmatter › Decision"
+    },
+    {
+     "path": "docs/adr/0020-jsonc-frontmatter.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0020 › Frontmatter is read as JSONC › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer matches the reference (JSONC frontmatter allows comments and trailing commas, with schema validation) and gives the current ADR 0020 rule over ADR 0007's strict JSON; every added detail (unknown brewer fields rejected, defaults/ stay strict JSON, 64 levels/1 MiB, ParseError) is stated in the cited passages."
+   }
+  },
+  {
+   "id": "amended-02",
+   "kind": "amended",
+   "question": "Do I need to give Foedrum a GitHub personal access token so it can read issues?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "No, Foedrum does not need a personal access token to read issues. It reaches GitHub only through your `gh` login, and it never reads, stores, passes or logs a token [2][1].\n\nADR 0073 supersedes the fine-grained personal access token client from ADR 0008 and the `GH_TOKEN` and `GITHUB_TOKEN` variables from ADR 0063, so `serve` no longer reads those variables or refuses to start without one [1][4][2].\n\nThe API calls go through `gh api`, and git over https goes through `gh` as its credential helper. You set this up with `gh auth login`, which stores the credential in the OS keyring since gh 2.26.0, and `gh auth setup-git` [2].\n\nThe token variables `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` are removed from the environment of every `gh` and `git` that Foedrum starts, because `gh` would prefer them to the keyring login [2].",
+   "passages": [
+    {
+     "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0073 › GitHub only through `gh`'s own login: Foedrum never holds a token"
+    },
+    {
+     "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+     "start": 14,
+     "end": 18,
+     "title": "ADR 0073 › GitHub only through `gh`'s own login: Foedrum never holds a token › Decision › One login, `gh`'s"
+    },
+    {
+     "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+     "start": 27,
+     "end": 27,
+     "title": "ADR 0073 › GitHub only through `gh`'s own login: Foedrum never holds a token › Decision › The client's transport is `gh api --include`"
+    },
+    {
+     "path": "docs/adr/0063-foedrum-serve-its-configuration-and-wiring.md",
+     "start": 32,
+     "end": 35,
+     "title": "ADR 0063 › `foedrum serve`: its configuration and wiring › Decision › GitHub and the order's text"
+    },
+    {
+     "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0073 › GitHub only through `gh`'s own login: Foedrum never holds a token › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer says no token is needed, that Foedrum goes only through the `gh` login (`gh api` and git credential helper) and never reads, stores, passes or logs a token, and that ADR 0073 supersedes the old PAT/`GH_TOKEN` approach, all of which the cited passages state."
+   }
+  },
+  {
+   "id": "amended-03",
+   "kind": "amended",
+   "question": "On Windows, does Foedrum have to go through a command shell to launch Claude Code?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "No, not for the native installer: on Windows, `claude.exe` starts directly without a shell, inside a Job Object (ADR 0039) [1][3]. The native installer puts `claude.exe` on `PATH`, and node starts it directly [5]. Only npm's global install, which gives `claude.cmd`, has to go through cmd.exe, and the runner validates every argument against a strict pattern and puts it in double quotes for that case [1][5]. This corrects ADR 0003's statement that on Windows the CLI can only be spawned through a shell, which ADR 0042 amends [2][5]. Prompts and settings go via stdin and files in both cases, never as arguments [3].",
+   "passages": [
+    {
+     "path": "docs/design/platform/cross-platform.md",
+     "start": 1,
+     "end": 8,
+     "title": "platform › cross-platform › Cross-platform rules for the code"
+    },
+    {
+     "path": "docs/adr/0003-drive-the-claude-cli.md",
+     "start": 15,
+     "end": 21,
+     "title": "ADR 0003 › Drive the user's `claude` CLI, not the Agent SDK › Consequences"
+    },
+    {
+     "path": "docs/design/recipes/how-a-brewer-runs.md",
+     "start": 58,
+     "end": 64,
+     "title": "recipes › how-a-brewer-runs › How a brewer runs"
+    },
+    {
+     "path": "docs/adr/0031-cmd-and-bat-files-through-cmd-exe.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0031 › `.cmd` and `.bat` files start through cmd.exe › Context"
+    },
+    {
+     "path": "docs/adr/0042-the-claude-command-line-and-stream-contract.md",
+     "start": 73,
+     "end": 75,
+     "title": "ADR 0042 › The `claude` command line and the stream the brewer runner reads › Decision › Spawning on Windows"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer matches the reference: the native claude.exe starts directly without a shell, only npm's claude.cmd goes through cmd.exe, and it explicitly corrects ADR 0003's outdated claim, with every claim supported by passages 1-5."
+   }
+  },
+  {
+   "id": "amended-04",
+   "kind": "amended",
+   "question": "Can a person actually talk with the agent while a step is running, or can the agent only leave questions to be answered later?",
+   "paraphrased": true,
+   "sourceHit": false,
+   "answer": "Brewers normally never ask mid-run: a question is an outcome (`needs_input`), and the answer starts the next attempt [1][2][3]. When a brewer returns `needs_input`, the session asks the engineer right away, so the wait is seconds rather than a comment round trip [2]. ADR 0222 amends ADR 0006 for interactive brewer steps: such a brewer talks to a person in its session [4][3]. `foedrum brew` opens that session in the terminal, and `serve` waits for one to be opened [4]. At a step that chooses the recipe, the answer starts the chosen recipe instead of the next attempt [1].",
+   "passages": [
+    {
+     "path": "docs/design/engine/failure-modes.md",
+     "start": 11,
+     "end": 15,
+     "title": "engine › failure-modes › Failure modes designed out"
+    },
+    {
+     "path": "docs/adr/0019-interactive-sessions-and-one-command-layer.md",
+     "start": 25,
+     "end": 28,
+     "title": "ADR 0019 › Interactive sessions, the autonomous Cellar, and one command layer › Decision › Interactive brewing"
+    },
+    {
+     "path": "docs/adr/0006-no-mid-run-questions.md",
+     "start": 20,
+     "end": 22,
+     "title": "ADR 0006 › Brewers never ask questions mid-run › Alternatives considered"
+    },
+    {
+     "path": "docs/adr/0222-a-recipe-s-brewer-step-may-be-interactive.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0222 › A recipe's brewer step may be interactive: `foedrum brew` opens its session in the terminal, `serve` waits for one"
+    },
+    {
+     "path": "docs/adr/0006-no-mid-run-questions.md",
+     "start": 5,
+     "end": 6,
+     "title": "ADR 0006 › Brewers never ask questions mid-run › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "no",
+    "unsupported": [
+     "the session asks the engineer right away on needs_input, presented as current behaviour, comes from ADR 0019 which is amended; passages do not confirm it still holds",
+     "interactive step is a recipe choice with `interactive: true` and prompt is not stated",
+     "no deadline for an open interactive session not stated",
+     "serve waits Stuck is stated only as 'waits' (minor)"
+    ],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer correctly says an interactive brewer step lets a person talk in a session (brew opens it in the terminal, serve waits), but it misses the recipe flag and the no-deadline point, and it mixes in the ADR 0019 session-asks-engineer claim, which the passages don't confirm as current."
+   }
+  },
+  {
+   "id": "amended-05",
+   "kind": "amended",
+   "question": "When Foedrum runs a repository's test command, can that command reach the internet?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Under ADR 0076, which amends ADR 0069, a check's test command cannot reach the internet: a check \"reads a tree; it fetches nothing\" and runs with no network [4]. ADR 0069's statement that checks run outside the OS sandbox with network access no longer holds, because 0076 moved checks into a sandbox [1][3]. That sandbox is stated for Linux and WSL2 (bubblewrap) and macOS, where a check cannot reach the network, and on Linux a check needs bubblewrap installed [3][5]. The passages do not say whether the sandbox applies on native Windows, so for Windows the answer is NOT COVERED [3][5]. The `setup` command, which installs dependencies, may run with network access under amendments 0140, 0158 and 0218, but the passages give only those ADRs' titles, not their text, so I cannot confirm the details [3][4].",
+   "passages": [
+    {
+     "path": "docs/adr/0069-check-steps-run-the-repositorys-commands-in-an-attempt-of-their-own.md",
+     "start": 48,
+     "end": 55,
+     "title": "ADR 0069 › Check steps run the repository's commands in an attempt of their own › Consequences"
+    },
+    {
+     "path": "docs/adr/0069-check-steps-run-the-repositorys-commands-in-an-attempt-of-their-own.md",
+     "start": 18,
+     "end": 19,
+     "title": "ADR 0069 › Check steps run the repository's commands in an attempt of their own › Decision › A check step is an attempt, run by the check runner"
+    },
+    {
+     "path": "docs/adr/0076-check-steps-run-in-an-os-sandbox-with-no-network.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0076 › Check steps run in an OS sandbox of Foedrum's own, with no network › Context"
+    },
+    {
+     "path": "docs/adr/0076-check-steps-run-in-an-os-sandbox-with-no-network.md",
+     "start": 72,
+     "end": 73,
+     "title": "ADR 0076 › Check steps run in an OS sandbox of Foedrum's own, with no network › Decision › Why no network"
+    },
+    {
+     "path": "docs/adr/0076-check-steps-run-in-an-os-sandbox-with-no-network.md",
+     "start": 81,
+     "end": 86,
+     "title": "ADR 0076 › Check steps run in an OS sandbox of Foedrum's own, with no network › Consequences"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer correctly says checks run in a no-network sandbox on Linux, WSL2 and macOS and that ADR 0069's outside-the-sandbox rule is superseded, but it leaves native Windows as not covered instead of saying checks run unsandboxed there with `\"unsandboxed\": true`, and it omits that a check does not run if the sandbox cannot start."
+   }
+  },
+  {
+   "id": "amended-06",
+   "kind": "amended",
+   "question": "If one of my test files is slow on my own laptop, will that make my local test run fail?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "No, a slow file on your laptop will not by itself make your local `npm test` fail. ADR 0136 amends ADR 0036 and ADR 0089 so that, outside CI, a file over its budget (5 s in `test/unit/`) or ceiling (15 s in `test/property/` and `test/chaos/`) is reported, not failed, and not run alone [1][2]. That file shows in the times block of every local run, so you still see it before CI does [3]. A file that really grew costly fails in CI instead, and the pull request cannot merge until it is fixed, since `ci-ok` is required [3]. If you set `CI` when running `npm test` to reproduce CI, you get CI's behaviour, including the runs alone [3].",
+   "passages": [
+    {
+     "path": "docs/adr/0136-the-test-budget-fails-only-in-ci.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0136 › The test budget fails only in CI › Context"
+    },
+    {
+     "path": "docs/adr/0036-test-budget-in-cpu-time.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0036 › The per-file test budget is CPU time › Context"
+    },
+    {
+     "path": "docs/adr/0136-the-test-budget-fails-only-in-ci.md",
+     "start": 17,
+     "end": 21,
+     "title": "ADR 0136 › The test budget fails only in CI › Consequences"
+    },
+    {
+     "path": "docs/adr/0036-test-budget-in-cpu-time.md",
+     "start": 17,
+     "end": 23,
+     "title": "ADR 0036 › The per-file test budget is CPU time › Consequences"
+    },
+    {
+     "path": "docs/adr/0241-each-test-runs-at-the-stage-where-it-pays-the-check-runs-the-test-files-a-change-reaches.md",
+     "start": 5,
+     "end": 20,
+     "title": "ADR 0241 › Each test runs at the stage where it pays: the check runs the test files a change reaches › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer says a slow file is only reported locally and fails in CI, matching the reference and ADR 0136, and it gives the current rule rather than ADR 0036's; every claim is supported by passages 1-3."
+   }
+  },
+  {
+   "id": "amended-07",
+   "kind": "amended",
+   "question": "Could I allow one of the agents to use the GitHub command line tool, for example to open a pull request itself?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "No, the passages say a brewer should not be allowed `gh`. A brewer runs as the same OS user, so one with `gh` could act with the maintainer's login, for example through `gh pr merge` or `gh auth token` [1]. The recipe's `tools.allow` must never include a rule that may start `gh`, such as `Bash(gh *)` or `Bash(env gh *)`, because only the engine talks to GitHub [3]. ADR 0073 says a Brewery should not allow `gh` until #204 lands, and the passages do not say whether it has [2]. Per the #229 amendment, the container level keeps brewers apart from the login, while the sandboxed level hides `gh`'s hosts file and token variables but leaves the keyring open, and the permissions-only level is separated only by the OS user [2]. The passages do not describe another way for an agent to open a pull request.",
+   "passages": [
+    {
+     "path": "docs/adr/0082-brewers-never-allow-gh.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0082 › Brewers never allow `gh`, and doctor says what can still reach its login › Context"
+    },
+    {
+     "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+     "start": 35,
+     "end": 36,
+     "title": "ADR 0073 › GitHub only through `gh`'s own login: Foedrum never holds a token › Decision › Brewers never reach `gh`"
+    },
+    {
+     "path": "docs/design/recipes/brewers.md",
+     "start": 55,
+     "end": 55,
+     "title": "recipes › brewers › Brewers › Fields"
+    },
+    {
+     "path": "defaults/lenses/diff/security.md",
+     "start": 11,
+     "end": 22,
+     "title": "lens diff/security › Lens: security › Look for"
+    },
+    {
+     "path": "docs/adr/0135-the-gate-drops-the-check-on-gh-pr-create-the-graphql-readers-and-the-alias-rule.md",
+     "start": 8,
+     "end": 10,
+     "title": "ADR 0135 › The gate drops the check on gh pr create, the GraphQL readers and the alias rule › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer says no, because a brewer runs as the same OS user and could act with the maintainer's login, and `tools.allow` must never include a rule that may start `gh`, which matches the reference and the passages. It also hedges that the passages don't say whether #204 has landed, though passages 1 and 3 show ADR 0082 settled the refusal."
+   }
+  },
+  {
+   "id": "amended-08",
+   "kind": "amended",
+   "question": "Where do the lessons learned about one particular project's code end up being saved?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Lessons about one project's code belong in the repository layer, which keeps them with the code they describe [1][4]. When a rule is promoted, it is written as `.foedrum/house-yeast/<lesson>.md` in the checkout under review and committed on the pull request's branch, so the code's reviewers approve it with the change [2][4]. Before promotion, a lesson waits as a line in `.foedrum/house-yeast-candidates.jsonl` in the main checkout, which is git-ignored and never committed [3]. For repositories whose `foedrum.jsonc` sets `houseYeast` to `\"brewery\"`, those rules are kept in the Brewery under `house-yeast/<repository>/` instead [4].",
+   "passages": [
+    {
+     "path": "docs/adr/0018-house-yeast-layers.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0018 › House yeast in three layers › Context"
+    },
+    {
+     "path": "docs/adr/0122-house-yeast-for-foedrum-s-own-reviews-candidates-in-the-main-checkout-rules-per-lens.md",
+     "start": 19,
+     "end": 21,
+     "title": "ADR 0122 › House yeast for Foedrum's own reviews: candidates in the main checkout, rules per lens within a budget › Decision › What becomes a candidate, and when a rule is proposed"
+    },
+    {
+     "path": "docs/adr/0122-house-yeast-for-foedrum-s-own-reviews-candidates-in-the-main-checkout-rules-per-lens.md",
+     "start": 12,
+     "end": 15,
+     "title": "ADR 0122 › House yeast for Foedrum's own reviews: candidates in the main checkout, rules per lens within a budget › Decision › Candidates live in one local file in the main checkout"
+    },
+    {
+     "path": "docs/adr/0018-house-yeast-layers.md",
+     "start": 19,
+     "end": 24,
+     "title": "ADR 0018 › House yeast in three layers › Decision › Three layers"
+    },
+    {
+     "path": "docs/adr/0245-brew-audit-a-read-only-audit-of-the-code-at-every-last-call.md",
+     "start": 22,
+     "end": 26,
+     "title": "ADR 0245 › /brew-audit: a read-only audit of the code and the ADRs at every last call, its findings kept in the main checkout › Decision › Findings are kept in the main checkout"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer says repository-layer rules live in `.foedrum/house-yeast/` committed in the repository and approved by its reviewers, with the `houseYeast: \"brewery\"` opt-out keeping them in the Brewery's `house-yeast/<repository>/`; each claim is backed by the cited passages."
+   }
+  },
+  {
+   "id": "amended-09",
+   "kind": "amended",
+   "question": "If the computer running Foedrum dies, is the history of its batches lost?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Under ADR 0011, the durable record is no longer only in the local SQLite file that ADR 0002 used, which is lost with the machine [1]. Each batch's `events.jsonl` now lives on the `foedrum/state` branch of the Brewery repository, committed and pushed at every step boundary [2]. SQLite is only the local index and working store, and `foedrum serve` rebuilds it from the state branch when it is missing or behind [2]. So a batch's history survives a machine loss once its state has been pushed, but the passages do not say what happens to progress made after the last step boundary [2]. ADR 0011 is amended by ADRs 0024, 0044 and 0263, whose text is not in the passages, so I cannot confirm how they change this layout [1].",
+   "passages": [
+    {
+     "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+     "start": 5,
+     "end": 6,
+     "title": "ADR 0011 › State in the Brewery repository › Context"
+    },
+    {
+     "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+     "start": 8,
+     "end": 15,
+     "title": "ADR 0011 › State in the Brewery repository › Decision"
+    },
+    {
+     "path": "docs/adr/0029-attempt-worktrees-layout-claims-and-repair.md",
+     "start": 21,
+     "end": 26,
+     "title": "ADR 0029 › Attempt worktrees: layout, claims and repair › Decision › Claims"
+    },
+    {
+     "path": "docs/adr/0222-a-recipe-s-brewer-step-may-be-interactive.md",
+     "start": 91,
+     "end": 96,
+     "title": "ADR 0222 › A recipe's brewer step may be interactive: `foedrum brew` opens its session in the terminal, `serve` waits for one › Consequences"
+    },
+    {
+     "path": "docs/adr/0044-batch-leases-held-by-the-driver-and-one-command-log.md",
+     "start": 24,
+     "end": 28,
+     "title": "ADR 0044 › Batch leases held by the driver, and one command log › Decision › Batch leases"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer correctly says history survives via the pushed `foedrum/state` branch and SQLite is rebuilt from it, but it says the passages do not specify the loss window instead of stating the reference's gap of at most one supervisor tick (5 s), and it adds a hedge about amending ADRs."
+   }
+  },
+  {
+   "id": "amended-10",
+   "kind": "amended",
+   "question": "Why is Foedrum's state kept on a branch of its own instead of on the Brewery's main branch?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "ADR 0011 first kept state off `main` because commits on the state branch are frequent and \"keeping them off `main` avoids noise\" [1][5]. ADR 0263 amends that reason: a Brewery is one person's working space, so noise on `main` is not a cost anyone pays there [1]. The reason that still holds is that the engine is the only writer to the state branch, so a push rejected as non-fast-forward means another engine wrote in between and the engine stops rather than diverging [1][3]. With state on `main`, a person's own push of a recipe or brewer would be rejected against the engine's pushes, or would cause a false stop, so the separate branch keeps the two writers apart even in a one-person Brewery [2]. A person never commits to `foedrum/state` by hand, because that would be a second writer [2][4].",
+   "passages": [
+    {
+     "path": "docs/adr/0263-the-state-branch-is-separate-so-the-engine-is-its-only-writer.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0263 › The state branch is separate so the engine is its only writer › Context"
+    },
+    {
+     "path": "docs/adr/0263-the-state-branch-is-separate-so-the-engine-is-its-only-writer.md",
+     "start": 14,
+     "end": 16,
+     "title": "ADR 0263 › The state branch is separate so the engine is its only writer › Consequences"
+    },
+    {
+     "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+     "start": 8,
+     "end": 15,
+     "title": "ADR 0011 › State in the Brewery repository › Decision"
+    },
+    {
+     "path": "docs/design/engine/state-branch.md",
+     "start": 1,
+     "end": 24,
+     "title": "engine › state-branch › State in the Brewery repository"
+    },
+    {
+     "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+     "start": 17,
+     "end": 22,
+     "title": "ADR 0011 › State in the Brewery repository › Consequences"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "yes",
+    "refused": "no",
+    "reason": "The answer gives the engine-as-only-writer reason with the rejected-push meaning, and states that ADR 0263 withdrew the earlier noise reason, with each claim supported by the cited passages."
+   }
+  },
+  {
+   "id": "recipe-01",
+   "kind": "recipe",
+   "question": "Which lenses review a change in Nip, and at what effort?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Nip tastes a change through four Tasters side by side: correctness, acceptance, security and design conformance [1][3]. ADR 0197 first tasted Nip through acceptance beside correctness, and ADR 0306 (security) and ADR 0343 (design conformance) later amended that, so the four now hold [5][3]. Correctness, acceptance and security run at high effort, and design conformance runs at the Taster's own medium effort [1][3]. Correctness is the one Taster that reads the whole change again after every round back [4]. Of the seven default lenses, cross-platform, necessity and test design are run by no shipped recipe, so Nip does not taste through them [2].",
+   "passages": [
+    {
+     "path": "defaults/recipes/nip.jsonc",
+     "start": 1,
+     "end": 17,
+     "title": "recipe nip"
+    },
+    {
+     "path": "docs/adr/0366-deep-brew-builds-a-change-that-can-reach-a-lot-through-every-diff-lens-and-a-blocking-brett-step.md",
+     "start": 5,
+     "end": 13,
+     "title": "ADR 0366 › Deep-brew builds a change that can reach a lot, through every diff lens and a blocking Brett step › Context"
+    },
+    {
+     "path": "docs/design/recipes/defaults.md",
+     "start": 42,
+     "end": 44,
+     "title": "recipes › defaults › Defaults › Default brewers"
+    },
+    {
+     "path": "defaults/recipes/nip.jsonc",
+     "start": 58,
+     "end": 65,
+     "title": "recipe nip › taste › correctness"
+    },
+    {
+     "path": "docs/adr/0197-acceptance-ships-as-a-default-diff-lens-and-nip-tastes-through-it-beside-correctness.md",
+     "start": 13,
+     "end": 16,
+     "title": "ADR 0197 › Acceptance ships as a default diff lens, and Nip tastes through it beside correctness › Decision"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "no",
+    "unsupported": [
+     "ADR 0197 first tasted Nip through acceptance beside correctness, and ADR 0306 and ADR 0343 later amended it — passage 5 says 0306 amends ADR 0197, but passage 3 does not state the sequence or that ADR 0343 amended 0197",
+     "Of the seven default lenses, cross-platform, necessity and test design are run by no shipped recipe — passage 2 says no shipped recipe runs them, which supports this, but 'seven default lenses' list in 5 includes design conformance, fine; however claim that 'the four now hold' as an amendment chain is inferred"
+    ],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gives the four lenses and the effort levels matching the reference (high for correctness, acceptance, security; the Taster's own medium for design conformance), but the ADR 0197 amendment-history claim goes beyond what the passages state, notably that ADR 0343 amended 0197, which passage 5 does not list."
+   }
+  },
+  {
+   "id": "recipe-02",
+   "kind": "recipe",
+   "question": "If I only want a big job broken down into smaller pieces, does anything get coded, and who looks over the breakdown?",
+   "paraphrased": true,
+   "sourceHit": false,
+   "answer": "The Brewmaster that plans an order breaks it into sub-orders and builds nothing itself [2]. The plan is written as an out doc whose frontmatter lists each sub-order's repo, the paths it touches, its dependencies, and whether it is ready [4]. Nothing is built from a plan until a person signs it off with `foedrum approve`, and no recipe setting turns that off [4][3]. A person reads the plan on the order's issue before anything is built from it, and until the `/foedrum:refine` plugin exists, a person corrects the plan with `foedrum lauter` [2][3]. That plugin is not built yet, and its design would let you steer the analysis in your own Claude Code session, read-only, and count the breakdown as approved [3][4].",
+   "passages": [
+    {
+     "path": "docs/adr/0233-a-plan-is-an-out-doc-whose-paths-the-engine-checks-shown-as-one-comment-per-order.md",
+     "start": 5,
+     "end": 9,
+     "title": "ADR 0233 › A plan is an out doc whose paths the engine checks, shown as one comment per order › Context"
+    },
+    {
+     "path": "defaults/brewers/brewmaster.md",
+     "start": 29,
+     "end": 31,
+     "title": "brewer brewmaster › Brewmaster"
+    },
+    {
+     "path": "docs/design/humans/refinement.md",
+     "start": 1,
+     "end": 13,
+     "title": "humans › refinement › Interactive refinement"
+    },
+    {
+     "path": "docs/design/intake/work-breakdown.md",
+     "start": 10,
+     "end": 12,
+     "title": "intake › work-breakdown › Work breakdown: orders, sub-orders and bottles"
+    },
+    {
+     "path": "defaults/brewers/finer.md",
+     "start": 25,
+     "end": 29,
+     "title": "brewer finer › Finer"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer correctly says nothing is built, the Brewmaster plans, and a person signs off with foedrum approve on the order's issue, but it omits the three Tasters reviewing the plan (the lenses, two rounds, Stuck) and so does not say who looks over the breakdown beyond the person."
+   }
+  },
+  {
+   "id": "recipe-03",
+   "kind": "recipe",
+   "question": "How does Decoction differ from Mash in how the plan is reviewed?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "Mash's plan review runs three lenses in parallel (coverage, sizing and naive-reader) before its lauter step [4]. Decoction has the same shape but runs all seven plan lenses in its group, and it has its own lauter step, so a person can correct its plan as they can with mash [2][1]. The security lens is among the seven and runs only in decoction, where it advises without blocking or routing [4][2]. Both recipes run one Taster per lens, and both send coverage and sizing blocks back to the plan step, up to two rounds each [2]. Mash's route is set by this ADR, which left it to #802 in ADR 0318 [3].",
+   "passages": [
+    {
+     "path": "defaults/recipes/decoction.jsonc",
+     "start": 1,
+     "end": 12,
+     "title": "recipe decoction"
+    },
+    {
+     "path": "docs/adr/0321-mash-and-decoction-review-a-plan-through-the-plan-lenses-apart.md",
+     "start": 19,
+     "end": 22,
+     "title": "ADR 0321 › `mash` and `decoction` review a plan through the plan lenses, apart › Decision"
+    },
+    {
+     "path": "docs/adr/0321-mash-and-decoction-review-a-plan-through-the-plan-lenses-apart.md",
+     "start": 1,
+     "end": 3,
+     "title": "ADR 0321 › `mash` and `decoction` review a plan through the plan lenses, apart"
+    },
+    {
+     "path": "docs/adr/0321-mash-and-decoction-review-a-plan-through-the-plan-lenses-apart.md",
+     "start": 15,
+     "end": 18,
+     "title": "ADR 0321 › `mash` and `decoction` review a plan through the plan lenses, apart › Decision"
+    },
+    {
+     "path": "docs/adr/0321-mash-and-decoction-review-a-plan-through-the-plan-lenses-apart.md",
+     "start": 27,
+     "end": 27,
+     "title": "ADR 0321 › `mash` and `decoction` review a plan through the plan lenses, apart › Decision"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer correctly says Decoction has the same shape as Mash but puts all seven plan lenses in its group instead of three. It omits that the coverage and security lenses run on the planner model, and every claim it makes is supported by the cited passages."
+   }
+  },
+  {
+   "id": "recipe-04",
+   "kind": "recipe",
+   "question": "When a new ticket comes in, how is it decided which workflow will handle it?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "A new Brewery issue becomes an order only when an allow-listed user opened it with a `recipe:<name>` label and it is not labelled `foedrum:sub-order` [4][2]. A target-repository issue is taken only if it passes the filter, is unassigned or assigned to this Brewery, and each filter label was last added by someone in `users` [1]. The `recipe:<name>` label chooses the recipe, which is the workflow that handles the batch [2]. If an issue has two such labels, or a recipe the Brewery lacks, it is reported once, and an unlabelled issue goes to Stuck on routing after the routing deadline [2]. Waiting orders are claimed by arrival (the issue's creation time), with ties going Brewery first, then by repository order, then by number, unless a person moved one with `foedrum rank` [3].",
+   "passages": [
+    {
+     "path": "docs/design/intake/target-issues.md",
+     "start": 24,
+     "end": 27,
+     "title": "intake › target-issues › Target-repository issues: a work queue"
+    },
+    {
+     "path": "docs/design/intake/routing.md",
+     "start": 1,
+     "end": 6,
+     "title": "intake › routing › Routing"
+    },
+    {
+     "path": "docs/adr/0208-orders-are-claimed-in-rank-order-by-arrival-unless-a-person-moved-one-with-foedrum-rank.md",
+     "start": 19,
+     "end": 21,
+     "title": "ADR 0208 › Orders are claimed in rank order: by arrival, unless a person moved one with `foedrum rank` › Decision › Arrival"
+    },
+    {
+     "path": "docs/adr/0068-the-intake-in-foedrum-serve-brewery-orders-and-routing-by-label.md",
+     "start": 16,
+     "end": 23,
+     "title": "ADR 0068 › The intake in `foedrum serve`: Brewery orders, routing by label, and relabelled issues › Decision › Which Brewery issues are orders"
+    },
+    {
+     "path": "docs/adr/0043-target-repository-issues-as-a-work-queue-claimed-by-a-ref.md",
+     "start": 33,
+     "end": 33,
+     "title": "ADR 0043 › Target-repository issues as a work queue, claimed by a ref › Decision › What the intake picks"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "no",
+    "unsupported": [
+     "Unlabelled issue goes to Stuck on routing is stated as general, but passage says this under routing; fine, however the claim that a target-issue is taken only if filter labels were added by users is cited as answering routing, not unsupported",
+     "The `recipe:<name>` label chooses the recipe, 'which is the workflow that handles the batch' is an equating not stated in passages"
+    ],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer gets the recipe-label-wins rule and Stuck on routing for unlabelled issues, but omits the foedrum mash/brew paths (Innkeeper suggestion, default recipe) and pads with intake-eligibility and ranking details that do not answer the routing question."
+   }
+  },
+  {
+   "id": "recipe-05",
+   "kind": "recipe",
+   "question": "In Deep-brew, what happens to mutants that Brett's mutation step finds the tests do not catch?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "In Deep-brew, a mutant the tests let survive becomes a finding sent back to the Gauger, which adds the tests that catch it, runs the red proof, and has Cellarman write the code again [1]. That round starts at the Gauger's latest success and does not include the code, per ADR 0358 [1]. ADR 0017 makes Brett's confirmed survivors advisory by default, but ADR 0319 amends that so a blocking Brett step sends them back [5][1][2]. Deep-brew runs two such rounds, and if survivors remain the batch is Stuck with them open [1]. Each survivor is listed on one line in the status comment's Findings and the pull request's report of the step [2].",
+   "passages": [
+    {
+     "path": "defaults/recipes/deep-brew.jsonc",
+     "start": 48,
+     "end": 57,
+     "title": "recipe deep-brew › mutants"
+    },
+    {
+     "path": "docs/design/recipes/tasting.md",
+     "start": 111,
+     "end": 116,
+     "title": "recipes › tasting › Tasting › Lenses together"
+    },
+    {
+     "path": "defaults/brewers/brett.md",
+     "start": 27,
+     "end": 33,
+     "title": "brewer brett › Brett"
+    },
+    {
+     "path": "docs/adr/0311-brett-s-mutants-of-a-target-land-on-lines-the-change-added-in-a-code-area-of-the-test-map.md",
+     "start": 20,
+     "end": 24,
+     "title": "ADR 0311 › Brett's mutants of a target land on lines the change added, in a code area of the test map › Consequences"
+    },
+    {
+     "path": "docs/adr/0017-test-first-recipes-and-tasting-lenses.md",
+     "start": 26,
+     "end": 29,
+     "title": "ADR 0017 › Test-first recipes and tasting lenses › Decision › Brett: an advisory mutation check"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "no",
+    "unsupported": [
+     "ADR 0319 amends ADR 0017 so a blocking Brett step sends survivors back (passage 5 only lists 0319 among amending ADRs and says a recipe can make Brett blocking; it does not state what 0319 changes)",
+     "Each survivor is listed on one line in status comment Findings and the PR report is stated in passage 2, but the claim that this applies in Deep-brew is not tied to it (minor)"
+    ],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference (findings go back to the Gauger, red proof, Cellarman rewrites, two rounds, then Stuck), but it attributes to ADR 0319 an amendment of ADR 0017's advisory default that the cited passages do not state explicitly."
+   }
+  },
+  {
+   "id": "recipe-06",
+   "kind": "recipe",
+   "question": "For a change that could affect a lot of the system, is the code review split across several reviewers or done by one?",
+   "paraphrased": true,
+   "sourceHit": false,
+   "answer": "For a change that can reach a lot, `deep-brew` uses one reviewer: a single Taster runs all seven diff lenses together, on the planner alias at the Taster's own effort [1][4]. ADR 0366 amends ADR 0224, so a default recipe now tastes its lenses together [1]. Seven separate Tasters, one per lens, were considered and not chosen [3]. On #867 the together setup found more defects, 2.0 per run against 1.5 for seven Sonnet Tasters apart [1]. The correctness lens text calls its reviewer \"one of several reviewers, each with one lens,\" but ADR 0366 sets the deep-brew Taster to run all seven lenses together [2][1].",
+   "passages": [
+    {
+     "path": "docs/adr/0366-deep-brew-builds-a-change-that-can-reach-a-lot-through-every-diff-lens-and-a-blocking-brett-step.md",
+     "start": 28,
+     "end": 33,
+     "title": "ADR 0366 › Deep-brew builds a change that can reach a lot, through every diff lens and a blocking Brett step › Decision"
+    },
+    {
+     "path": "defaults/lenses/diff/correctness.md",
+     "start": 1,
+     "end": 3,
+     "title": "lens diff/correctness › Lens: correctness"
+    },
+    {
+     "path": "docs/adr/0366-deep-brew-builds-a-change-that-can-reach-a-lot-through-every-diff-lens-and-a-blocking-brett-step.md",
+     "start": 77,
+     "end": 83,
+     "title": "ADR 0366 › Deep-brew builds a change that can reach a lot, through every diff lens and a blocking Brett step › Alternatives considered"
+    },
+    {
+     "path": "defaults/recipes/deep-brew.jsonc",
+     "start": 1,
+     "end": 14,
+     "title": "recipe deep-brew"
+    },
+    {
+     "path": "docs/adr/0366-deep-brew-builds-a-change-that-can-reach-a-lot-through-every-diff-lens-and-a-blocking-brett-step.md",
+     "start": 65,
+     "end": 70,
+     "title": "ADR 0366 › Deep-brew builds a change that can reach a lot, through every diff lens and a blocking Brett step › Consequences"
+    }
+   ],
+   "verdict": {
+    "correct": "partly",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer correctly says one Taster runs all seven lenses together, but it omits the findings going back to Cellarman twice per run and then Stuck, and the 'Seven separate Tasters... considered and not chosen' claim is supported by [3]."
+   }
+  },
+  {
+   "id": "recipe-07",
+   "kind": "recipe",
+   "question": "If a new test needs a function that doesn't exist yet, what should the placeholder do?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "The placeholder should be the smallest stub that lets the tests load, and it should throw an error whose message is `not implemented` [1]. It must never return a value such as `false`, `0`, `[]`, `null` or an empty object [1]. A value-returning stub is flagged because it lets some new tests pass before any implementation exists, and a new test that passes before implementation fails the red proof [2][3].",
+   "passages": [
+    {
+     "path": "defaults/brewers/gauger.md",
+     "start": 31,
+     "end": 37,
+     "title": "brewer gauger › Gauger"
+    },
+    {
+     "path": "defaults/lenses/diff/test-design.md",
+     "start": 28,
+     "end": 35,
+     "title": "lens diff/test-design › Lens: test design › Look for"
+    },
+    {
+     "path": "docs/adr/0078-the-red-proof-reads-the-test-report-and-testsunchanged-compares-lines.md",
+     "start": 26,
+     "end": 28,
+     "title": "ADR 0078 › The red proof reads the test report, and testsUnchanged compares the lines of the tests › Decision › What counts as missing behaviour"
+    },
+    {
+     "path": "defaults/brewers/cellarman.md",
+     "start": 39,
+     "end": 43,
+     "title": "brewer cellarman › Cellarman"
+    },
+    {
+     "path": "docs/adr/0178-a-name-before-a-parenthesis-declares-a-test-only-where-no-call-can-stand.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0178 › A name before a parenthesis declares a test only where no call can stand › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference: smallest stub that lets tests load, throws `not implemented`, never returns a value, and a passing test fails the red proof, all stated in passages 1-3."
+   }
+  },
+  {
+   "id": "recipe-08",
+   "kind": "recipe",
+   "question": "In a quick fix, if the code stops compiling or tests break after the fix is written, where does the work go?",
+   "paraphrased": true,
+   "sourceHit": false,
+   "answer": "If Cellarman's code breaks an older test that is right, that is a genuine regression, and it stays with Cellarman, which fixes its code [5]. In the Nip recipe, any finding from the four Tasters sends the batch back to Cellarman [1]. An older test that must change goes through the Gauger's red commit instead, which costs a blocked Cellarman attempt, a Gauger attempt, a red proof and rewritten code [5]. NOT COVERED: the passages do not say where a compile failure goes in a quick fix. The failing-check route in ADR 0219 and ADR 0226 covers an open pull request's head or merged tree, after the pull request opens [2][4].",
+   "passages": [
+    {
+     "path": "defaults/recipes/nip.jsonc",
+     "start": 1,
+     "end": 17,
+     "title": "recipe nip"
+    },
+    {
+     "path": "docs/adr/0226-a-failing-check-on-the-merged-tree-sends-its-batch-back-to-the-fix-step.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0226 › A failing check on the merged tree sends its batch back to the fix step › Context"
+    },
+    {
+     "path": "docs/adr/0197-acceptance-ships-as-a-default-diff-lens-and-nip-tastes-through-it-beside-correctness.md",
+     "start": 30,
+     "end": 34,
+     "title": "ADR 0197 › Acceptance ships as a default diff lens, and Nip tastes through it beside correctness › Alternatives considered"
+    },
+    {
+     "path": "docs/adr/0219-a-failing-check-on-an-open-pull-request-sends-its-batch-back-to-a-fix-step.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0219 › A failing check on an open pull request sends its batch back to a fix step › Context"
+    },
+    {
+     "path": "docs/adr/0358-an-older-test-changes-only-in-the-gauger-s-red-commit.md",
+     "start": 59,
+     "end": 64,
+     "title": "ADR 0358 › An older test changes only in the Gauger's red commit › Consequences"
+    }
+   ],
+   "verdict": {
+    "correct": "no",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The reference says a green-step failure (build, typecheck, lint, format, test) goes back to Cellarman at most once and the Finer runs again; the answer says the passages don't cover where a compile failure goes, and its Cellarman-related claims concern older-test regressions and Taster findings, not the green step."
+   }
+  },
+  {
+   "id": "recipe-09",
+   "kind": "recipe",
+   "question": "Is there a rule of thumb for how large each piece of a planned job should be?",
+   "paraphrased": true,
+   "sourceHit": true,
+   "answer": "Each sub-order should be about 1,000 changed lines or one mechanism at most, in exactly one repository, and a larger one should be split again [4]. A small, clear order is one sub-order, and splitting should not be done for its own sake [4]. The sizing review treats the 1,000-line figure as a measure, not a limit, so an entry slightly past it that is plainly one mechanism is not flagged [5]. Generated output and fixtures count for less than code, so reviewers judge the work a person reviews rather than a raw line count [2]. ADR 0234 states the same sub-order rule in the brewmaster prompt it adopts [3].",
+   "passages": [
+    {
+     "path": "defaults/lenses/plan/sizing.md",
+     "start": 1,
+     "end": 5,
+     "title": "lens plan/sizing › Lens: sizing"
+    },
+    {
+     "path": "defaults/lenses/plan/sizing.md",
+     "start": 7,
+     "end": 16,
+     "title": "lens plan/sizing › Lens: sizing › Look for"
+    },
+    {
+     "path": "docs/adr/0234-the-brewmaster-writes-a-plan-on-the-planner-alias-and-mash-runs-it.md",
+     "start": 35,
+     "end": 39,
+     "title": "ADR 0234 › The Brewmaster writes a plan on the planner alias, and `mash` runs it › Decision › What the prompt asks"
+    },
+    {
+     "path": "defaults/brewers/brewmaster.md",
+     "start": 40,
+     "end": 45,
+     "title": "brewer brewmaster › Brewmaster › Break it into sub-orders"
+    },
+    {
+     "path": "defaults/lenses/plan/sizing.md",
+     "start": 18,
+     "end": 27,
+     "title": "lens plan/sizing › Lens: sizing › Do not"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer states the ~1,000 lines or one mechanism rule and that it is a measure, not a limit, so a slightly larger single-mechanism entry is not flagged, and every claim is supported by the cited passages."
+   }
+  },
+  {
+   "id": "recipe-10",
+   "kind": "recipe",
+   "question": "What does the necessity lens check, and what counts as proof that a safeguard is needed?",
+   "paraphrased": false,
+   "sourceHit": true,
+   "answer": "The necessity lens checks each new safeguard a change adds, such as a guard, check, CI step, retry, lock, or test layer, for proof that it is needed and not already done elsewhere [2][3]. Proof is either an observed failure (an issue, CI run, bug report, log, or failing test) or a concrete path reachable today, showing who or what controls the input, what they do, and what goes wrong without the safeguard [1]. A decision record, or the issue with its maintainers' comments and the pull request description, counts as proof when it names the safeguard's observed failure or reachable path, and the lens reports only when no record gives one or the one given does not hold [1][5]. ADR 0276 amends ADR 0173 on what counts as proof: a recorded keep decision answers only whether a duplicate stays, and a recorded cost only the cost-against-benefit weighing, and neither is proof of need [5][3]. Phrases such as \"to be safe\", \"defence in depth\" or \"could in theory\" are not proof, and a safeguard against an actor the repository's security model trusts is not needed [1].",
+   "passages": [
+    {
+     "path": "defaults/lenses/diff/necessity.md",
+     "start": 9,
+     "end": 17,
+     "title": "lens diff/necessity › Lens: necessity › Look for"
+    },
+    {
+     "path": "defaults/lenses/diff/necessity.md",
+     "start": 1,
+     "end": 7,
+     "title": "lens diff/necessity › Lens: necessity"
+    },
+    {
+     "path": "docs/adr/0173-necessity-ships-as-a-default-diff-lens.md",
+     "start": 5,
+     "end": 16,
+     "title": "ADR 0173 › Necessity ships as a default diff lens › Context"
+    },
+    {
+     "path": "docs/adr/0173-necessity-ships-as-a-default-diff-lens.md",
+     "start": 18,
+     "end": 24,
+     "title": "ADR 0173 › Necessity ships as a default diff lens › Decision"
+    },
+    {
+     "path": "docs/adr/0276-the-order-a-review-reads-holds-its-recorded-scope-decisions.md",
+     "start": 17,
+     "end": 18,
+     "title": "ADR 0276 › The order a review reads holds its recorded scope decisions › Decision"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "no",
+    "reason": "The answer matches the reference on what the lens reviews and on what counts as proof, and its extra details (decision records as proof, keep/cost records not being proof, the rejected phrases) are all stated in passages [1], [2] and [5]."
+   }
+  },
+  {
+   "id": "unanswerable-01",
+   "kind": "unanswerable",
+   "question": "If I report a security vulnerability privately, how many days until the maintainer responds or publishes a fix?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: the passages explain how to report privately and that the fix and advisory are worked out there before anything is public [1], but they give no number of days for a response or a fix.",
+   "passages": [
+    {
+     "path": "SECURITY.md",
+     "start": 3,
+     "end": 7,
+     "title": "SECURITY › Security › Reporting a vulnerability"
+    },
+    {
+     "path": "docs/adr/0113-github-s-security-features-on-the-foedrum-repository.md",
+     "start": 13,
+     "end": 16,
+     "title": "ADR 0113 › GitHub's security features on the Foedrum repository › Consequences"
+    },
+    {
+     "path": "docs/adr/0113-github-s-security-features-on-the-foedrum-repository.md",
+     "start": 8,
+     "end": 11,
+     "title": "ADR 0113 › GitHub's security features on the Foedrum repository › Decision"
+    },
+    {
+     "path": "SECURITY.md",
+     "start": 25,
+     "end": 27,
+     "title": "SECURITY › Security › What GitHub checks on this repository"
+    },
+    {
+     "path": "docs/adr/0113-github-s-security-features-on-the-foedrum-repository.md",
+     "start": 5,
+     "end": 6,
+     "title": "ADR 0113 › GitHub's security features on the Foedrum repository › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The reference answer is a refusal because the documents give no response or fix timeline, and the answer correctly says the passages give no number of days, accurately citing passage [1] for how private reporting works."
+   }
+  },
+  {
+   "id": "unanswerable-02",
+   "kind": "unanswerable",
+   "question": "On what date is the public launch (milestone M3) planned?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: The passages give M3's exit criterion (`npx foedrum init` works on Windows, macOS and Linux) and mark it Open [1][2], but none gives a planned date for the public launch.",
+   "passages": [
+    {
+     "path": "docs/milestones/README.md",
+     "start": 17,
+     "end": 21,
+     "title": "milestones › README › Milestones"
+    },
+    {
+     "path": "ROADMAP.md",
+     "start": 9,
+     "end": 11,
+     "title": "ROADMAP › Roadmap"
+    },
+    {
+     "path": "README.md",
+     "start": 86,
+     "end": 88,
+     "title": "README › Contributing"
+    },
+    {
+     "path": "docs/adr/0113-github-s-security-features-on-the-foedrum-repository.md",
+     "start": 8,
+     "end": 11,
+     "title": "ADR 0113 › GitHub's security features on the Foedrum repository › Decision"
+    },
+    {
+     "path": "docs/adr/0016-delivery-npm-cli-and-companion-plugin.md",
+     "start": 8,
+     "end": 14,
+     "title": "ADR 0016 › Delivery: an npm CLI and a companion Claude Code plugin › Decision"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The reference answer is a refusal, and the answer correctly says the passages give no planned date for M3, only its exit criterion and Open status, which the passages support."
+   }
+  },
+  {
+   "id": "unanswerable-03",
+   "kind": "unanswerable",
+   "question": "Am I allowed to use the Foedrum logo or mascot in a blog post or a conference talk?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: The passages say the name, logo and mascot are outside the AGPL code licence and that a trademark policy will govern their use [1][2], but that policy is not included, so I cannot say whether blog or conference use is allowed.",
+   "passages": [
+    {
+     "path": "README.md",
+     "start": 90,
+     "end": 96,
+     "title": "README › Licence"
+    },
+    {
+     "path": "docs/adr/0009-agpl-and-cla.md",
+     "start": 8,
+     "end": 11,
+     "title": "ADR 0009 › AGPL-3.0 with a Contributor License Agreement › Decision"
+    },
+    {
+     "path": "README.md",
+     "start": 1,
+     "end": 18,
+     "title": "README"
+    },
+    {
+     "path": "docs/adr/0009-agpl-and-cla.md",
+     "start": 13,
+     "end": 17,
+     "title": "ADR 0009 › AGPL-3.0 with a Contributor License Agreement › Consequences"
+    },
+    {
+     "path": "docs/adr/0009-agpl-and-cla.md",
+     "start": 5,
+     "end": 6,
+     "title": "ADR 0009 › AGPL-3.0 with a Contributor License Agreement › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The reference is a refusal, and the answer declines to say whether blog or conference use is allowed, accurately noting that the passages only say the logo and mascot are outside the code licence and that a trademark policy will govern their use."
+   }
+  },
+  {
+   "id": "unanswerable-04",
+   "kind": "unanswerable",
+   "question": "How many dollars does a typical batch of the nip recipe cost to brew?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: the passages give no dollar cost for a `nip` batch. Receipts show no cost since ADR 0181 [5], and ADR 0224 excluded dollars from its comparison [2]. They give only token counts, with a median of about 2.4M tokens per `nip` batch [1].",
+   "passages": [
+    {
+     "path": "docs/adr/0366-deep-brew-builds-a-change-that-can-reach-a-lot-through-every-diff-lens-and-a-blocking-brett-step.md",
+     "start": 60,
+     "end": 63,
+     "title": "ADR 0366 › Deep-brew builds a change that can reach a lot, through every diff lens and a blocking Brett step › Measured"
+    },
+    {
+     "path": "docs/adr/0224-the-default-recipes-taste-apart-or-together-as-a-seeded-comparison-measured.md",
+     "start": 38,
+     "end": 45,
+     "title": "ADR 0224 › The default recipes taste apart or together as a seeded comparison measured › Alternatives considered"
+    },
+    {
+     "path": "docs/adr/0366-deep-brew-builds-a-change-that-can-reach-a-lot-through-every-diff-lens-and-a-blocking-brett-step.md",
+     "start": 52,
+     "end": 58,
+     "title": "ADR 0366 › Deep-brew builds a change that can reach a lot, through every diff lens and a blocking Brett step › Measured"
+    },
+    {
+     "path": "docs/adr/0264-nip-s-correctness-taster-blocks-and-sends-its-findings-back-to-cellarman.md",
+     "start": 17,
+     "end": 18,
+     "title": "ADR 0264 › Nip's correctness Taster blocks and sends its findings back to Cellarman › Decision"
+    },
+    {
+     "path": "docs/adr/0181-receipts-show-no-cost.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0181 › Receipts show no cost › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The answer correctly states the passages give no dollar cost for a nip batch, citing ADR 0181 (no cost on receipts) and ADR 0224 (dollars excluded), and the ~2.4M median token figure matches passage 1."
+   }
+  },
+  {
+   "id": "unanswerable-05",
+   "kind": "unanswerable",
+   "question": "Why was 3 chosen as the default open-order limit rather than some other number?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: the passages record that the maintainer set the default at 3 on 2026-10-26 [2] and that a default of the larger of 3 and `concurrency` was rejected because it would not be one number to read [1], but they give no reason for the value 3 itself.",
+   "passages": [
+    {
+     "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+     "start": 87,
+     "end": 87,
+     "title": "ADR 0217 › A recipe's concurrency and the open-order limit hold what the intake starts › Alternatives considered"
+    },
+    {
+     "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+     "start": 50,
+     "end": 53,
+     "title": "ADR 0217 › A recipe's concurrency and the open-order limit hold what the intake starts › Decision › The settings"
+    },
+    {
+     "path": "docs/design/intake/limits.md",
+     "start": 19,
+     "end": 24,
+     "title": "intake › limits › Limits"
+    },
+    {
+     "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+     "start": 5,
+     "end": 9,
+     "title": "ADR 0217 › A recipe's concurrency and the open-order limit hold what the intake starts › Context"
+    },
+    {
+     "path": "docs/design/recipes/configuration.md",
+     "start": 79,
+     "end": 83,
+     "title": "recipes › configuration › Configuration files"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The answer declines because the passages give no reason for choosing 3, matching the reference refusal, and its supporting details (maintainer decision on 2026-10-26 in [2], rejected alternative in [1]) are stated in the passages."
+   }
+  },
+  {
+   "id": "unanswerable-06",
+   "kind": "unanswerable",
+   "question": "How big does the foedrum/state branch typically get after a few months of brewing?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: the passages cap each out doc at 256 KiB and say a plan or review is a few kilobytes [1], and they describe append-only `events.jsonl` files [2], but they give no typical total size or growth rate for the state branch after months of brewing.",
+   "passages": [
+    {
+     "path": "docs/adr/0103-out-docs-reach-the-state-branch-through-the-store.md",
+     "start": 16,
+     "end": 17,
+     "title": "ADR 0103 › Out docs reach the state branch through the store › Decision"
+    },
+    {
+     "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+     "start": 8,
+     "end": 15,
+     "title": "ADR 0011 › State in the Brewery repository › Decision"
+    },
+    {
+     "path": "docs/design/layout.md",
+     "start": 37,
+     "end": 44,
+     "title": "layout › Layout"
+    },
+    {
+     "path": "docs/design/engine/state-branch.md",
+     "start": 1,
+     "end": 24,
+     "title": "engine › state-branch › State in the Brewery repository"
+    },
+    {
+     "path": "docs/adr/0263-the-state-branch-is-separate-so-the-engine-is-its-only-writer.md",
+     "start": 5,
+     "end": 8,
+     "title": "ADR 0263 › The state branch is separate so the engine is its only writer › Context"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The answer says the passages give no typical total size or growth rate for the state branch, matching the reference refusal, and the cited facts (256 KiB cap, a few kilobytes per plan or review, append-only events.jsonl) are stated in passages 1 and 2."
+   }
+  },
+  {
+   "id": "unanswerable-07",
+   "kind": "unanswerable",
+   "question": "What is the oldest version of Windows or macOS that Foedrum supports?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: The passages name Windows, macOS and Linux as supported platforms [1][2] but give no minimum Windows or macOS version.",
+   "passages": [
+    {
+     "path": "docs/design/platform/README.md",
+     "start": 1,
+     "end": 10,
+     "title": "platform › Platform support"
+    },
+    {
+     "path": "docs/adr/0010-cross-platform-and-isolation-levels.md",
+     "start": 8,
+     "end": 15,
+     "title": "ADR 0010 › Cross-platform support and isolation levels › Decision"
+    },
+    {
+     "path": "SECURITY.md",
+     "start": 21,
+     "end": 23,
+     "title": "SECURITY › Security › Versions"
+    },
+    {
+     "path": "docs/adr/0200-foedrum-requires-git-2-38.md",
+     "start": 5,
+     "end": 10,
+     "title": "ADR 0200 › Foedrum requires git 2.38 › Context"
+    },
+    {
+     "path": "docs/design/checks/coverage-spike.md",
+     "start": 29,
+     "end": 32,
+     "title": "checks › coverage-spike › Line coverage for the red proof (spike #618) › The setup"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The answer declines because the passages give no minimum Windows or macOS version, matching the reference refusal, and its claim that Windows, macOS and Linux are supported is stated in passages 1 and 2."
+   }
+  },
+  {
+   "id": "unanswerable-08",
+   "kind": "unanswerable",
+   "question": "How many target repositories can one Brewery be configured to work on at most?",
+   "paraphrased": false,
+   "sourceHit": false,
+   "answer": "NOT COVERED: the passages describe Breweries of several repositories ([1][4]) and a capacity limit on batches started per pass ([5]), but none gives a maximum number of target repositories per Brewery.",
+   "passages": [
+    {
+     "path": "docs/adr/0301-a-brewery-order-s-read-only-attempt-reads-every-repository-in-a-checkout-of-each.md",
+     "start": 5,
+     "end": 13,
+     "title": "ADR 0301 › A Brewery order's read-only attempt reads every repository in a checkout of each › Context"
+    },
+    {
+     "path": "docs/adr/0043-target-repository-issues-as-a-work-queue-claimed-by-a-ref.md",
+     "start": 78,
+     "end": 83,
+     "title": "ADR 0043 › Target-repository issues as a work queue, claimed by a ref › Consequences"
+    },
+    {
+     "path": "docs/adr/0013-single-repo-sub-orders-bottles-and-releases.md",
+     "start": 8,
+     "end": 16,
+     "title": "ADR 0013 › Single-repository sub-orders, bottles and release dependencies › Decision"
+    },
+    {
+     "path": "docs/adr/0199-foedrum-init-writes-a-brewery-s-files-in-its-clone.md",
+     "start": 15,
+     "end": 22,
+     "title": "ADR 0199 › `foedrum init` writes a Brewery's files in its clone › Decision › What it asks"
+    },
+    {
+     "path": "docs/adr/0043-target-repository-issues-as-a-work-queue-claimed-by-a-ref.md",
+     "start": 33,
+     "end": 33,
+     "title": "ADR 0043 › Target-repository issues as a work queue, claimed by a ref › Decision › What the intake picks"
+    }
+   ],
+   "verdict": {
+    "correct": "yes",
+    "faithful": "yes",
+    "unsupported": [],
+    "current": "n/a",
+    "refused": "yes",
+    "reason": "The reference answer is a refusal because the documents give no maximum, and the answer correctly says none of the passages states a maximum number of target repositories, with accurate descriptions of [1], [4] and [5]."
+   }
+  }
+ ]
+}
