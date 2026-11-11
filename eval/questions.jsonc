@@ -1,0 +1,1100 @@
+// Grain Bill M2 question set: questions about Foedrum answered from its documents.
+// Answers hold at Foedrum commit 2d64a6e3904c8f514efa135237035c45ae42a57a (origin/main, 2026-11-11).
+// Kinds: design (how it works now), why (reason from an ADR), amended (a later ADR changed the rule;
+// "stale" is the outdated answer), recipe (what runs, from defaults/), unanswerable (expect a refusal;
+// "near" lists the closest passages and why they do not answer).
+// Sources: path and line range at that commit; "quote" is a verbatim piece of the range's first line.
+// "paraphrased": worded with few words of its source.
+// "review": how the entry was checked. "model-triage": drafted by Claude, then checked against its sources
+// (with the surrounding text and later amending ADRs) by a separate Claude pass, which corrected 10 entries.
+// "hand": also read by a person against its sources.
+[
+  {
+    "id": "design-01",
+    "kind": "design",
+    "question": "Where does Foedrum keep its durable state, and what happens when pushing that state is rejected?",
+    "answer": "In the Brewery's git repository: SQLite is written first, and the supervisor's next tick flushes the new events to the state branch. A rejected push stops the engine instead of merging.",
+    "sources": [
+      {
+        "path": "docs/design/engine/state-branch.md",
+        "lines": "3-4",
+        "quote": "The Brewery is a git repository, so it also holds Foedrum's durable state"
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-02",
+    "kind": "design",
+    "question": "If the Foedrum process crashes and I start it again, what happens to the jobs that were in flight?",
+    "answer": "On start the driver expires the attempt leases its earlier run left, since those processes died, so the supervisor's next ticks treat those attempts as lost (one per batch and tick) and no new attempt runs beside them. Its batch leases are not expired, so it carries on driving the batches it held.",
+    "sources": [
+      {
+        "path": "docs/design/engine/leases.md",
+        "lines": "9",
+        "quote": "A driver that starts on a store sets the leases its own earlier run left to expire at once"
+      },
+      {
+        "path": "docs/design/engine/leases.md",
+        "lines": "18",
+        "quote": "Unlike an attempt lease, a batch lease is not expired at a driver's start"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-03",
+    "kind": "design",
+    "question": "How often does Foedrum look at GitHub for new work, and does that eat into my API allowance?",
+    "answer": "It polls once a minute. Each read carries the ETag of the previous answer, so an unchanged poll is a 304 that costs no rate limit.",
+    "sources": [
+      {
+        "path": "docs/design/intake/polling.md",
+        "lines": "4",
+        "quote": "ADR 0052 sets the polling interval at a minute, which `foedrum serve` applies"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-04",
+    "kind": "design",
+    "question": "What is the open-order limit, what is its default, and which orders count as open?",
+    "answer": "`openOrders` (1 to 20, default 3) holds a new order while that many orders are open. An order is open while it has work left, such as a batch Ordered, Brewing, Conditioning or Stuck, so paused, stopped and Stuck orders count, while one with only On tap or cancelled batches does not.",
+    "sources": [
+      {
+        "path": "docs/design/intake/limits.md",
+        "lines": "20-22",
+        "quote": "**The open-order limit** (`openOrders`, 1 to 20, default 3)"
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-05",
+    "kind": "design",
+    "question": "What is the difference between `foedrum pause` and `foedrum stop`?",
+    "answer": "Pause starts no new attempt and lets a running attempt end at its next convenient point, until `continue`. Stop ends an order's work at once: each brewing batch goes Stuck with reason `stopped`, its unfinished attempts are abandoned and the driver stops their processes at its next tick; `retry` continues from the same step.",
+    "sources": [
+      {
+        "path": "docs/design/humans/pause.md",
+        "lines": "3-8",
+        "quote": "An engineer halts work with `foedrum pause` and goes on with `foedrum continue`"
+      },
+      {
+        "path": "docs/design/humans/pause.md",
+        "lines": "29",
+        "quote": "ends an order's work at once, and `retry` continues it from the same step"
+      },
+      {
+        "path": "docs/design/humans/pause.md",
+        "lines": "40-41",
+        "quote": "Each brewing batch of the order, its sub-orders' too, goes Stuck with reason `stopped`"
+      }
+    ],
+    "paraphrased": false,
+    "note": "Lines 3-8 include the mermaid diagram that says no new attempt starts and a running attempt ends at its next convenient point.",
+    "review": "model-triage"
+  },
+  {
+    "id": "design-06",
+    "kind": "design",
+    "question": "If Claude runs out of my subscription allowance halfway through a job, does the job fail?",
+    "answer": "No. The engine holds the brewer attempts that limit covers until the window reopens and then goes on by itself; the interrupted step is scheduled again as a retry that does not count against its attempts, so the batch stays brewing. A spend limit or a too-low credit balance, by contrast, makes the batch Stuck.",
+    "sources": [
+      {
+        "path": "docs/design/engine/usage-window.md",
+        "lines": "3",
+        "quote": "When claude hits a usage limit of its subscription, the engine holds the brewer attempts"
+      },
+      {
+        "path": "docs/design/engine/usage-window.md",
+        "lines": "18",
+        "quote": "schedules the step again as a retry; the recipe counts its attempts without it"
+      },
+      {
+        "path": "docs/design/engine/usage-window.md",
+        "lines": "29",
+        "quote": "A spend limit or a too-low credit balance still makes the batch Stuck"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-07",
+    "kind": "design",
+    "question": "What does the Finer do, and where does it run in the Nip recipe?",
+    "answer": "The Finer simplifies a batch's change and commits it before the checks and reviews read it. Nip runs it as the `fine` step between `implement` and `green`.",
+    "sources": [
+      {
+        "path": "docs/design/recipes/fining.md",
+        "lines": "3",
+        "quote": "simplifies a batch's change and commits it, before the checks and the reviews read it"
+      },
+      {
+        "path": "docs/design/recipes/fining.md",
+        "lines": "12",
+        "quote": "Nip runs it as `fine`, between `implement` and `green`"
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-08",
+    "kind": "design",
+    "question": "What does a test-first recipe's red proof need from the repository, and what happens if it is missing?",
+    "answer": "A test map: `.foedrum/test-map.jsonc` in the target repository, or `test-maps/<owner>/<name>.jsonc` in the Brewery for a repository that sets `\"testMap\": \"brewery\"`. Without one the batch stops Stuck (`environment`) at its start, naming the fix, before any brewer runs, unless the recipe runs a survey and the repository keeps its own map, in which case the survey proposes one.",
+    "sources": [
+      {
+        "path": "docs/design/checks/red-proof.md",
+        "lines": "10-11",
+        "quote": "**A red proof needs a test map**"
+      },
+      {
+        "path": "docs/design/checks/red-proof.md",
+        "lines": "15",
+        "quote": "Where the recipe runs a survey check and the repository keeps its map, the survey proposes one"
+      },
+      {
+        "path": "docs/glossary.md",
+        "lines": "31",
+        "quote": "`.foedrum/test-map.jsonc` in a target repository, or the Brewery's `test-maps/<owner>/<name>.jsonc`"
+      }
+    ],
+    "paraphrased": false,
+    "note": "Line 12 covers the Brewery-kept map, line 13 the repository-kept map without a survey; line 15 is the survey exception.",
+    "review": "model-triage"
+  },
+  {
+    "id": "design-09",
+    "kind": "design",
+    "question": "When Foedrum runs tests that an AI wrote, can that code reach the internet or my home folder?",
+    "answer": "On Linux, WSL2 and macOS a check runs in Foedrum's own OS sandbox (bwrap or sandbox-exec) with no network, the home folder hidden and writes only in the worktree and a temporary folder; if the sandbox cannot start, the check is not run. On native Windows checks run unsandboxed, and each reading says so.",
+    "sources": [
+      {
+        "path": "docs/design/checks/sandbox.md",
+        "lines": "3-4",
+        "quote": "A check's command line runs in an OS sandbox of Foedrum's own"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-10",
+    "kind": "design",
+    "question": "Will my laptop doze off while Foedrum is in the middle of a job?",
+    "answer": "Not on its idle timer: `foedrum brew` and `foedrum serve` hold off idle sleep while an attempt runs and let go a minute after the last one ends. The display may still turn off, and the machine still sleeps when you ask, close the lid or the battery is critical; `\"keepAwake\": false` turns the hold off. The hold needs a helper (PowerShell on Windows, `caffeinate` on macOS, `systemd-inhibit` on Linux where systemd runs); where the helper is missing, the machine sleeps as before.",
+    "sources": [
+      {
+        "path": "docs/design/platform/keep-awake.md",
+        "lines": "3-6",
+        "quote": "`foedrum brew` and `foedrum serve` keep the machine from sleeping on its idle timer"
+      },
+      {
+        "path": "docs/design/platform/keep-awake.md",
+        "lines": "14-15",
+        "quote": "| Linux | `systemd-inhibit --what=idle --who=foedrum"
+      }
+    ],
+    "paraphrased": true,
+    "review": "hand"
+  },
+  {
+    "id": "design-11",
+    "kind": "design",
+    "question": "How are the engine's invariants tested, and how do I reproduce a failing run?",
+    "answer": "Property tests generate seeded event sequences and engine scenarios, including what a fake brewer runner does in each attempt (hangs, lost attempts, stalls, denial storms), and run them through `decide`, the guard, the fold and the supervisor on an in-memory store, one property per invariant I1 to I6. A failure is shrunk and reported with its seed; setting `FOEDRUM_SEED` to that seed replays it.",
+    "sources": [
+      {
+        "path": "docs/design/testing/property.md",
+        "lines": "3-6",
+        "quote": "on the engine: generated sequences must keep invariants I1"
+      },
+      {
+        "path": "docs/design/testing/fake-runner.md",
+        "lines": "3",
+        "quote": "with scripted behaviours: succeed, fail (retryable or not), hang, crash mid-step"
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "design-12",
+    "kind": "design",
+    "question": "Which part of the system is responsible for stopping an agent from touching files, network or credentials outside the folder it works in?",
+    "answer": "Claude Code's sandbox, together with the per-attempt settings Foedrum writes (tool allow and deny rules, `--setting-sources \"\"`, a minimal environment). Those settings allow file tools only inside the worktree, so a call outside it, through `..` or through a link that leads outside, is denied.",
+    "sources": [
+      {
+        "path": "docs/trust-boundaries.md",
+        "lines": "9",
+        "quote": "A brewer reaching outside its worktree: files, network, credentials"
+      },
+      {
+        "path": "docs/design/security.md",
+        "lines": "31",
+        "quote": "Generated per-attempt settings allow file tools only inside the worktree"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "why-01",
+    "kind": "why",
+    "question": "Why is Foedrum written in TypeScript rather than plain JavaScript or Python?",
+    "answer": "Foedrum's core is a state machine whose correctness depends on handling every state and step outcome, and TypeScript's discriminated unions with an exhaustive switch turn a forgotten state or outcome into a compile error, which plain JavaScript cannot check. Python was judged weaker for a cross-platform CLI with a live web dashboard and would mean two runtimes for users.",
+    "sources": [
+      {
+        "path": "docs/adr/0001-typescript-on-node.md",
+        "lines": "6-6",
+        "quote": "Foedrum's core is a state machine whose correctness depends on handling every state and every step outcome."
+      },
+      {
+        "path": "docs/adr/0001-typescript-on-node.md",
+        "lines": "16-16",
+        "quote": "Discriminated unions plus exhaustive `switch` with `never` turn a forgotten state or outcome into a compile error."
+      },
+      {
+        "path": "docs/adr/0001-typescript-on-node.md",
+        "lines": "21-22",
+        "quote": "no compile-time exhaustiveness checks; the main stability tool is lost."
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "why-02",
+    "kind": "why",
+    "question": "Why is the code under a license that makes people share their changes, and why do contributors have to sign an agreement?",
+    "answer": "The project wants to be genuine open source that individuals and companies can use, while preventing closed commercial resale, in particular running a modified Foedrum as a hosted service without sharing the changes; hence the AGPL-3.0. The Contributor License Agreement lets the project later relicense or offer a commercial licence alongside the AGPL.",
+    "sources": [
+      {
+        "path": "docs/adr/0009-agpl-and-cla.md",
+        "lines": "6-6",
+        "quote": "while preventing closed commercial resale, in particular offering a modified Foedrum as a hosted service without sharing the changes"
+      },
+      {
+        "path": "docs/adr/0009-agpl-and-cla.md",
+        "lines": "10-10",
+        "quote": "so the project can later relicense or offer a commercial licence alongside the AGPL"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "why-03",
+    "kind": "why",
+    "question": "Why does the process runner kill a process that writes too much output instead of just keeping part of it?",
+    "answer": "The runner held all output without a limit, and commands run on untrusted repository content can write without end; a measured test made it throw `RangeError: Invalid string length`, an uncaught exception that would crash the engine, the gate or the cleanup while the writer kept running. Killing at a 4 MiB limit bounds memory and stops a runaway writer at once, and because a killed process has no exit code a caller never mistakes cut output for complete output, which keeping only the first or last bytes would risk.",
+    "sources": [
+      {
+        "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+        "lines": "8-8",
+        "quote": "Commands run against untrusted repository content can write far more than any caller needs before their deadline"
+      },
+      {
+        "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+        "lines": "19-20",
+        "quote": "The runner's memory is bounded for every caller, with or without a deadline"
+      },
+      {
+        "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+        "lines": "25-26",
+        "quote": "a caller that parses stdout (`git worktree list --porcelain`, JSON) would read a cut-off text that looks whole"
+      }
+    ],
+    "paraphrased": false,
+    "review": "hand"
+  },
+  {
+    "id": "why-04",
+    "kind": "why",
+    "question": "Why don't the commits the AI agents make carry a line crediting the AI tool that wrote them?",
+    "answer": "A brewer's commits land in a target repository whose history belongs to the team that owns it, and Foedrum stays neutral about the tools behind it; leaving Claude Code's default would make every commit advertise a tool the repository's owner did not choose. So the runner's settings always switch attribution off, using empty strings rather than `false` because older Claude Code versions reject `false` and skip the whole settings file, deny rules included.",
+    "sources": [
+      {
+        "path": "docs/adr/0151-brewers-write-no-attribution.md",
+        "lines": "6-6",
+        "quote": "A brewer's commits land in a target repository, whose history belongs to the team that owns it, and Foedrum stays neutral about the tools behind it"
+      },
+      {
+        "path": "docs/adr/0151-brewers-write-no-attribution.md",
+        "lines": "12-12",
+        "quote": "says an earlier version rejects it and skips the whole settings file that holds it"
+      },
+      {
+        "path": "docs/adr/0151-brewers-write-no-attribution.md",
+        "lines": "21-21",
+        "quote": "Every commit in a target repository would advertise the tool, which the repository's owner did not choose."
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "why-05",
+    "kind": "why",
+    "question": "Why do brewers run claude with its auto-updater and nonessential traffic disabled?",
+    "answer": "During a brew, claude updated itself from 2.1.301 to 2.1.310 mid-brew, because brewers read no user settings; the binary is the user's own, so that update changed the claude every session on the machine runs and the version Foedrum's stream contract was checked against. Nonessential traffic is also turned off because telemetry, error reports and feature-flag fetching are not needed by an attempt and can change claude's behaviour between attempts of one brew.",
+    "sources": [
+      {
+        "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+        "lines": "6",
+        "quote": "A brewer's claude starts with `--setting-sources \"\"`"
+      },
+      {
+        "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+        "lines": "9-10",
+        "quote": "In the fourth brew (batch `9-1`, #442)"
+      },
+      {
+        "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+        "lines": "25",
+        "quote": "| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `1` | The updater again"
+      },
+      {
+        "path": "docs/adr/0177-brewers-run-without-claude-s-auto-updater-and-nonessential-traffic.md",
+        "lines": "48",
+        "quote": "**`DISABLE_AUTOUPDATER` alone.** It stops the update that was seen, but leaves telemetry"
+      }
+    ],
+    "paraphrased": false,
+    "review": "hand"
+  },
+  {
+    "id": "why-06",
+    "kind": "why",
+    "question": "My machine has an older git and Foedrum refuses to start; why does it insist on a newer one?",
+    "answer": "Foedrum requires git 2.38 because the check of open pull requests against their moved base runs `git merge-tree --write-tree`, which arrived in git 2.38; before, that check was silently skipped on older git. A check that runs on some machines and silently not on others is a gap in what an open pull request is told, and git 2.38 is four years old.",
+    "sources": [
+      {
+        "path": "docs/adr/0200-foedrum-requires-git-2-38.md",
+        "lines": "7-7",
+        "quote": "runs `git merge-tree --write-tree`, which came in git 2.38 (October 2022)"
+      },
+      {
+        "path": "docs/adr/0200-foedrum-requires-git-2-38.md",
+        "lines": "9-9",
+        "quote": "a check that runs on some machines and silently not on others is a gap in what an open pull request is told, and git 2.38 is four years old"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "why-07",
+    "kind": "why",
+    "question": "Why are the design docs written with a line break after every sentence, even mid-paragraph?",
+    "answer": "Git merges line by line, so two pull requests that change different sentences of one long paragraph line always conflict; the old architecture.md, one paragraph per line, caused most of a day's merge conflicts. With one sentence per line the rendered page is the same and git merges edits to different sentences.",
+    "sources": [
+      {
+        "path": "docs/adr/0149-docs-layout-a-map-and-one-page-per-concept.md",
+        "lines": "7-9",
+        "quote": "Most of it was written one paragraph per line"
+      },
+      {
+        "path": "docs/adr/0149-docs-layout-a-map-and-one-page-per-concept.md",
+        "lines": "22-23",
+        "quote": "**One sentence per line** in every page (semantic line breaks)."
+      }
+    ],
+    "paraphrased": true,
+    "note": "Replaced a draft that duplicated amended-10 (ADR 0263).",
+    "review": "hand"
+  },
+  {
+    "id": "why-08",
+    "kind": "why",
+    "question": "Why does a public pull request not name its sibling pull request in a private repository?",
+    "answer": "GitHub hides a private pull request's contents, but naming it in a public body would still reveal the private repository's name and that it has a pull request of this change. So a sibling is named only where everyone who reads this pull request can read it too; a hidden sibling is still listed by its place in the merge order, so the reviewer sees no gap.",
+    "sources": [
+      {
+        "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+        "lines": "8",
+        "quote": "GitHub hides that pull request's contents from outsiders, but the repository's name"
+      },
+      {
+        "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+        "lines": "20",
+        "quote": "**A sibling is named only where everyone who reads this pull request can read it too.**"
+      },
+      {
+        "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+        "lines": "31",
+        "quote": "A hidden sibling's line reads `<n>. A pull request in a private repository: <state>, <when>.`"
+      },
+      {
+        "path": "docs/adr/0300-a-public-pull-request-names-a-sibling-in-a-private-repository-by-its-place-only.md",
+        "lines": "53",
+        "quote": "**Leave a private sibling out of the section**: the public pull request would show a merge order with a gap"
+      }
+    ],
+    "paraphrased": false,
+    "review": "hand"
+  },
+  {
+    "id": "why-09",
+    "kind": "why",
+    "question": "Why can't I start work on the same issue again while its change is still waiting to be merged?",
+    "answer": "An issue's number means its latest batch, and allowing a new order while the pull request was open let a failed check send the older batch back to brewing behind the later one; in one run a command brewed the wrong batch and reported success. Refusing the new order keeps one live batch per issue, so its number always reaches it; to order again, close the pull request first.",
+    "sources": [
+      {
+        "path": "docs/adr/0339-an-issue-has-one-live-batch-no-second-batch-while-its-pull-request-is-open.md",
+        "lines": "6-7",
+        "quote": "A number means its issue's latest batch"
+      },
+      {
+        "path": "docs/adr/0339-an-issue-has-one-live-batch-no-second-batch-while-its-pull-request-is-open.md",
+        "lines": "11-12",
+        "quote": "brewed the later batch to on tap and exited 0, with the older batch still Stuck"
+      },
+      {
+        "path": "docs/adr/0339-an-issue-has-one-live-batch-no-second-batch-while-its-pull-request-is-open.md",
+        "lines": "23-23",
+        "quote": "Then an issue has one live batch, so its number always reaches it"
+      },
+      {
+        "path": "docs/adr/0339-an-issue-has-one-live-batch-no-second-batch-while-its-pull-request-is-open.md",
+        "lines": "51-51",
+        "quote": "A person who wants a second batch closes the pull request first."
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "why-10",
+    "kind": "why",
+    "question": "Why must every recipe declare a required type, mash or brew?",
+    "answer": "Planning recipes used to be a fixed list of three names, so a Brewery's own planning recipe under another name was neither refused for a sub-order nor counted as planning, and the Innkeeper told planning from building only by descriptions. The type is required rather than optional with a default of `brew`, because a default would let a planning recipe silently count as building.",
+    "sources": [
+      {
+        "path": "docs/adr/0365-a-recipe-has-a-type-mash-or-brew.md",
+        "lines": "7-9",
+        "quote": "was a list of three names, `PLANNING_RECIPES` in `src/schemas/plan.ts`"
+      },
+      {
+        "path": "docs/adr/0365-a-recipe-has-a-type-mash-or-brew.md",
+        "lines": "54-54",
+        "quote": "a Brewery's planning recipe would silently count as building, the gap this record closes"
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "amended-01",
+    "kind": "amended",
+    "question": "Can I put comments and trailing commas in the frontmatter of a brewer file or an out doc?",
+    "answer": "Yes. All frontmatter (brewers, out docs, house-yeast rules) is read with the same JSONC reader as configuration, so comments and trailing commas are allowed; strictness comes from validating each frontmatter object against its schema.",
+    "sources": [
+      {
+        "path": "docs/adr/0020-jsonc-frontmatter.md",
+        "lines": "11-12",
+        "quote": "All frontmatter (brewers, out docs, house-yeast rules) is read with the same JSONC reader as configuration"
+      },
+      {
+        "path": "docs/adr/0007-jsonc-config-and-json-frontmatter.md",
+        "lines": "10",
+        "quote": "are Markdown with **JSON frontmatter** between `---` lines"
+      }
+    ],
+    "paraphrased": false,
+    "stale": "ADR 0007: brewers and out docs carry strict JSON frontmatter (only configuration and recipes are JSONC).",
+    "review": "model-triage"
+  },
+  {
+    "id": "amended-02",
+    "kind": "amended",
+    "question": "Do I need to give Foedrum a GitHub personal access token so it can read issues?",
+    "answer": "No. Foedrum reaches GitHub only through the maintainer's `gh` login (`gh auth login`, stored in the OS keyring): the API through `gh api` and git over https through `gh` as git's credential helper. Foedrum never reads, stores, passes or logs a token.",
+    "sources": [
+      {
+        "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+        "lines": "15-16",
+        "quote": "Foedrum reaches GitHub only through the maintainer's `gh` login"
+      },
+      {
+        "path": "docs/adr/0008-polling-intake.md",
+        "lines": "11",
+        "quote": "GitHub access uses `fetch` with a small in-house client."
+      }
+    ],
+    "paraphrased": false,
+    "stale": "ADR 0008: GitHub access uses `fetch` with an in-house client, authenticated in 1.0 with a fine-grained personal access token.",
+    "review": "model-triage"
+  },
+  {
+    "id": "amended-03",
+    "kind": "amended",
+    "question": "On Windows, does Foedrum have to go through a command shell to launch Claude Code?",
+    "answer": "Not with the native installer: it puts `claude.exe` on PATH, a console program Node starts directly without a shell. Only npm's global install gives `claude.cmd`, which is started through cmd.exe.",
+    "sources": [
+      {
+        "path": "docs/adr/0042-the-claude-command-line-and-stream-contract.md",
+        "lines": "74",
+        "quote": "The native installer puts `claude.exe` on `PATH`, a console program that node starts directly, without a shell"
+      },
+      {
+        "path": "docs/adr/0003-drive-the-claude-cli.md",
+        "lines": "19",
+        "quote": "On Windows the CLI can only be spawned through a shell"
+      }
+    ],
+    "paraphrased": false,
+    "stale": "ADR 0003: on Windows the CLI can only be spawned through a shell, so every argument is validated and prompts travel via stdin.",
+    "note": "ADR 0042 line 74 says in words that it corrects ADR 0003's sentence.",
+    "review": "model-triage"
+  },
+  {
+    "id": "amended-04",
+    "kind": "amended",
+    "question": "Can a person actually talk with the agent while a step is running, or can the agent only leave questions to be answered later?",
+    "answer": "A recipe can make any brewer step interactive (`\"interactive\": true` with a first `prompt`); `foedrum brew` on a terminal then opens the session for a person to talk in, and an open interactive session has no deadline. Under `serve` such a step waits Stuck for someone to open the session.",
+    "sources": [
+      {
+        "path": "docs/adr/0222-a-recipe-s-brewer-step-may-be-interactive.md",
+        "lines": "24-25",
+        "quote": "A brewer step may say **`\"interactive\": true`** with a **`\"prompt\"`**"
+      },
+      {
+        "path": "docs/adr/0222-a-recipe-s-brewer-step-may-be-interactive.md",
+        "lines": "61",
+        "quote": "**An open interactive session has no deadline**"
+      },
+      {
+        "path": "docs/adr/0006-no-mid-run-questions.md",
+        "lines": "16",
+        "quote": "No session is ever waiting on a human; nothing needs to be kept alive."
+      }
+    ],
+    "paraphrased": true,
+    "stale": "ADR 0006: brewers never ask questions mid-run; a question is an outcome (`needs_input`), the batch goes Stuck, and no session ever waits on a human.",
+    "note": "Headless steps still end with needs_input as in 0006; 0222 adds the interactive step kind. Under serve, see 0222 lines 38-40 (waiting_for_session).",
+    "review": "hand"
+  },
+  {
+    "id": "amended-05",
+    "kind": "amended",
+    "question": "When Foedrum runs a repository's test command, can that command reach the internet?",
+    "answer": "On Linux, WSL2 and macOS a check's command runs in an OS sandbox of Foedrum's own (bubblewrap or Seatbelt) with no network, and it does not run at all if the sandbox cannot start. Native Windows has no such sandbox, so there it runs unsandboxed and each reading says `\"unsandboxed\": true`.",
+    "sources": [
+      {
+        "path": "docs/adr/0076-check-steps-run-in-an-os-sandbox-with-no-network.md",
+        "lines": "28-29",
+        "quote": "**Never unsandboxed outside Windows.**"
+      },
+      {
+        "path": "docs/adr/0076-check-steps-run-in-an-os-sandbox-with-no-network.md",
+        "lines": "38",
+        "quote": "No network: a namespace of its own with no interface to the host's"
+      },
+      {
+        "path": "docs/adr/0069-check-steps-run-the-repositorys-commands-in-an-attempt-of-their-own.md",
+        "lines": "18",
+        "quote": "**Checks run outside the OS sandbox, for now.**"
+      }
+    ],
+    "paraphrased": true,
+    "stale": "ADR 0069: checks run outside the OS sandbox, as the Cellar's user, with network and home-folder access.",
+    "note": "ADR 0140 later adds a repository `setup` command (e.g. npm ci) that runs before the checks with the network (0140 lines 12 and 22: a check step has no network; setup has). ADR 0158 then put setup into the check sandbox with the network kept, so it is unsandboxed only on native Windows; ADR 0218 gives a Linux setup its own network namespace through slirp4netns or pasta. The checks themselves stay without network.",
+    "review": "hand"
+  },
+  {
+    "id": "amended-06",
+    "kind": "amended",
+    "question": "If one of my test files is slow on my own laptop, will that make my local test run fail?",
+    "answer": "No. Outside CI a file over its CPU-time budget or ceiling is only listed in the test file times block with the advice, and does not fail `npm test`; in CI the budget still fails the run.",
+    "sources": [
+      {
+        "path": "docs/adr/0136-the-test-budget-fails-only-in-ci.md",
+        "lines": "13-14",
+        "quote": "a file over the budget or the ceiling is listed in the \"test file times\" block"
+      },
+      {
+        "path": "docs/adr/0036-test-budget-in-cpu-time.md",
+        "lines": "18",
+        "quote": "A file that does more work than the budget allows still fails `npm test`, `npm run check` and the gate"
+      }
+    ],
+    "paraphrased": true,
+    "stale": "ADR 0036: a test file over its CPU-time budget (5 s unit, 15 s property/chaos) fails `npm test`, `npm run check` and the gate, whatever the load.",
+    "review": "model-triage"
+  },
+  {
+    "id": "amended-07",
+    "kind": "amended",
+    "question": "Could I allow one of the agents to use the GitHub command line tool, for example to open a pull request itself?",
+    "answer": "No. A brewer's `tools.allow` and the attempt settings refuse every shell rule that may start `gh`, with any arguments, because a brewer runs as the same OS user and could act with the maintainer's login; the engine is the only part that uses it.",
+    "sources": [
+      {
+        "path": "docs/adr/0082-brewers-never-allow-gh.md",
+        "lines": "11",
+        "quote": "A brewer's `tools.allow` and the attempt settings refuse every shell rule that may start `gh`"
+      },
+      {
+        "path": "docs/adr/0073-github-only-through-gh-s-own-login.md",
+        "lines": "36",
+        "quote": "A brewer runs as the same OS user, so a brewer that may run `gh` could use the maintainer's login."
+      }
+    ],
+    "paraphrased": true,
+    "stale": "ADR 0073: the refusal of `Bash(gh *)` is not in place yet; until #204 lands, a brewer whose allowlist lets it run `gh` can act with the maintainer's login.",
+    "note": "0082's status line says it amends 0073 on exactly this point (\"brewers never reach gh, which it left to #204\").",
+    "review": "model-triage"
+  },
+  {
+    "id": "amended-08",
+    "kind": "amended",
+    "question": "Where do the lessons learned about one particular project's code end up being saved?",
+    "answer": "In that repository itself: repository-layer house-yeast rules live in `.foedrum/house-yeast/` committed in the target repository and are approved by its owners in the bottle that introduces them. A repository can opt out with `houseYeast: \"brewery\"`, keeping them under the Brewery's `house-yeast/<repository>/`.",
+    "sources": [
+      {
+        "path": "docs/adr/0018-house-yeast-layers.md",
+        "lines": "17",
+        "quote": "`.foedrum/house-yeast/` committed in the target repository"
+      },
+      {
+        "path": "docs/adr/0018-house-yeast-layers.md",
+        "lines": "21",
+        "quote": "per repository, `houseYeast` in `foedrum.jsonc` is `\"repo\"` (default) or `\"brewery\"`"
+      },
+      {
+        "path": "docs/adr/0015-house-yeast.md",
+        "lines": "9",
+        "quote": "is the Brewery's collection of learned rules, stored as files in `house-yeast/`"
+      }
+    ],
+    "paraphrased": true,
+    "stale": "ADR 0015: all learned rules are stored as files in the Brewery's `house-yeast/`.",
+    "review": "model-triage"
+  },
+  {
+    "id": "amended-09",
+    "kind": "amended",
+    "question": "If the computer running Foedrum dies, is the history of its batches lost?",
+    "answer": "No, with one gap. The durable record lives in the Brewery repository on the `foedrum/state` branch (an append-only `events.jsonl` and the out docs per batch), committed and pushed at every step boundary, which in practice is the supervisor's next tick, at most one tick (5 s by default) later. Only events not yet pushed at that moment are lost with the machine; a new machine rebuilds SQLite, which is only the local index and working store, from the branch.",
+    "sources": [
+      {
+        "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+        "lines": "9-11",
+        "quote": "The **durable record** lives in the Brewery repository on a dedicated branch"
+      },
+      {
+        "path": "docs/adr/0044-batch-leases-held-by-the-driver-and-one-command-log.md",
+        "lines": "21-22",
+        "quote": "[ADR 0024](0024-state-branch-layout-outbox-and-divergence.md) flushes the state branch at a step boundary."
+      },
+      {
+        "path": "docs/adr/0002-event-sourced-engine-on-node-sqlite.md",
+        "lines": "12",
+        "quote": "Storage is **SQLite through the built-in `node:sqlite`** module"
+      }
+    ],
+    "paraphrased": true,
+    "stale": "ADR 0002: the event log, the single source of truth, is stored in a local SQLite file (so losing the machine loses the history, as ADR 0011's context notes).",
+    "note": "ADR 0011 is itself amended (0024, 0044, 0263), but none of those moves the record off foedrum/state; 0263 line 12 confirms the decision stands.",
+    "review": "hand"
+  },
+  {
+    "id": "amended-10",
+    "kind": "amended",
+    "question": "Why is Foedrum's state kept on a branch of its own instead of on the Brewery's main branch?",
+    "answer": "So that the engine is its only writer: a rejected push of `foedrum/state` then means one thing, that another engine wrote to it. The earlier reason, keeping frequent commits off `main` to avoid noise, was withdrawn.",
+    "sources": [
+      {
+        "path": "docs/adr/0263-the-state-branch-is-separate-so-the-engine-is-its-only-writer.md",
+        "lines": "11-12",
+        "quote": "The state branch is separate so that its only writer is the engine."
+      },
+      {
+        "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+        "lines": "21",
+        "quote": "Commits on the state branch are frequent; keeping them off `main` avoids noise."
+      }
+    ],
+    "paraphrased": false,
+    "stale": "ADR 0011: commits on the state branch are frequent, and keeping them off `main` avoids noise in the configuration history.",
+    "review": "model-triage"
+  },
+  {
+    "id": "recipe-01",
+    "kind": "recipe",
+    "question": "Which lenses review a change in Nip, and at what effort?",
+    "answer": "Four Tasters review the change side by side through the correctness, acceptance, security and design conformance lenses. Correctness, acceptance and security run at high effort; design conformance runs at the Taster's own effort.",
+    "sources": [
+      {
+        "path": "defaults/recipes/nip.jsonc",
+        "lines": "56-72",
+        "quote": "\"id\": \"taste\","
+      }
+    ],
+    "paraphrased": false,
+    "note": "Header comment lines 10-11 state the Taster's own effort is medium; the step lines only omit effort for design-conformance.",
+    "review": "model-triage"
+  },
+  {
+    "id": "recipe-02",
+    "kind": "recipe",
+    "question": "If I only want a big job broken down into smaller pieces, does anything get coded, and who looks over the breakdown?",
+    "answer": "Nothing is built in Mash: the Brewmaster reads the order and breaks it into sub-orders, and three Tasters review the plan side by side through the plan/coverage (on the planner model), plan/sizing and plan/naive-reader lenses; their findings send the plan back to the Brewmaster (two rounds per run, then the batch is Stuck with them open). The plan is then shown on the order's issue, where the batch waits Stuck until a person signs it off with foedrum approve.",
+    "sources": [
+      {
+        "path": "defaults/recipes/mash.jsonc",
+        "lines": "13",
+        "quote": "Plan an order as sub-orders through three lenses, shown on its issue; nothing is built"
+      },
+      {
+        "path": "defaults/recipes/mash.jsonc",
+        "lines": "17-34",
+        "quote": "{ \"id\": \"plan\", \"brewer\": \"brewmaster\" },"
+      },
+      {
+        "path": "defaults/recipes/mash.jsonc",
+        "lines": "1-8",
+        "quote": "Mash, a plan of an order (ADR 0234): the Brewmaster reads the order and its repository and breaks"
+      }
+    ],
+    "paraphrased": true,
+    "review": "hand"
+  },
+  {
+    "id": "recipe-03",
+    "kind": "recipe",
+    "question": "How does Decoction differ from Mash in how the plan is reviewed?",
+    "answer": "Decoction runs Mash's steps but puts all seven plan lenses in the review group: coverage, sizing, naive-reader, order-and-overlap, testability, recipe-fit and security. Coverage and security run on the planner model.",
+    "sources": [
+      {
+        "path": "defaults/recipes/decoction.jsonc",
+        "lines": "1",
+        "quote": "Mash's steps, with all seven plan lenses in"
+      },
+      {
+        "path": "defaults/recipes/decoction.jsonc",
+        "lines": "22-31",
+        "quote": "\"lens\": \"plan/coverage\","
+      }
+    ],
+    "paraphrased": false,
+    "note": "Mash's three lenses are in recipe-02 (mash.jsonc 26-31).",
+    "review": "model-triage"
+  },
+  {
+    "id": "recipe-04",
+    "kind": "recipe",
+    "question": "When a new ticket comes in, how is it decided which workflow will handle it?",
+    "answer": "By its `recipe:<name>` label: that label wins. Under foedrum serve an issue without one is not given a recipe by itself (it waits for the routing deadline, then is Stuck on routing). When a person runs foedrum mash on it, or foedrum brew on an unlabelled issue (which uses the Brewery's default recipe, mash-in unless defaultRecipe says otherwise), Mash-in runs: the Innkeeper reads the order and suggests one of the Brewery's recipes with its reason, the engineer's answer chooses the recipe, the batch starts it from its first step, and the issue is labelled with it.",
+    "sources": [
+      {
+        "path": "docs/design/intake/routing.md",
+        "lines": "3",
+        "quote": "**Routing:** a `recipe:<name>` label wins, and `foedrum serve` chooses no recipe for an unlabelled issue by itself;"
+      },
+      {
+        "path": "docs/design/intake/routing.md",
+        "lines": "8",
+        "quote": "`foedrum mash <issue>` routes a Brewery issue's Ordered or routing-Stuck batch"
+      },
+      {
+        "path": "docs/design/intake/routing.md",
+        "lines": "12",
+        "quote": "`foedrum brew <n>` on an issue with no recipe label"
+      },
+      {
+        "path": "defaults/recipes/mash-in.jsonc",
+        "lines": "1-4",
+        "quote": "Mash-in, the first step of a mash (ADR 0232): the Innkeeper reads the order and asks one question,"
+      },
+      {
+        "path": "defaults/recipes/mash-in.jsonc",
+        "lines": "10",
+        "quote": "\"steps\": [{ \"id\": \"innkeep\", \"brewer\": \"innkeeper\", \"chooses\": \"recipe\" }]"
+      },
+      {
+        "path": "defaults/brewers/innkeeper.md",
+        "lines": "29",
+        "quote": "Read the order in {order} and suggest which recipe of {recipes} brews it."
+      }
+    ],
+    "paraphrased": true,
+    "review": "hand"
+  },
+  {
+    "id": "recipe-05",
+    "kind": "recipe",
+    "question": "In Deep-brew, what happens to mutants that Brett's mutation step finds the tests do not catch?",
+    "answer": "Each surviving mutant is a finding that goes back to the Gauger, who adds tests that catch it; the red proof checks they fail and Cellarman writes the code again. This happens at most two rounds per run, then the batch is Stuck with the survivors open.",
+    "sources": [
+      {
+        "path": "defaults/recipes/deep-brew.jsonc",
+        "lines": "49-56",
+        "quote": "Each mutant the tests let survive is a finding that goes back to the Gauger"
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "recipe-06",
+    "kind": "recipe",
+    "question": "For a change that could affect a lot of the system, is the code review split across several reviewers or done by one?",
+    "answer": "In Deep-brew, one Taster on the planner model reviews through all seven diff lenses together (correctness, acceptance, security, design conformance, test design, necessity, cross-platform). Its findings go back to Cellarman, two rounds per run, then the batch is Stuck.",
+    "sources": [
+      {
+        "path": "defaults/recipes/deep-brew.jsonc",
+        "lines": "59-75",
+        "quote": "One Taster on Opus through every diff lens"
+      }
+    ],
+    "paraphrased": true,
+    "review": "hand"
+  },
+  {
+    "id": "recipe-07",
+    "kind": "recipe",
+    "question": "If a new test needs a function that doesn't exist yet, what should the placeholder do?",
+    "answer": "The Gauger, which writes the failing tests first, adds the smallest stub that lets the tests load and makes it throw an error with the message `not implemented`. It must never return a value such as false, 0, [] or null, because a test that passes against it fails the red proof.",
+    "sources": [
+      {
+        "path": "defaults/brewers/gauger.md",
+        "lines": "35",
+        "quote": "**Stubs throw `not implemented`.**"
+      },
+      {
+        "path": "defaults/recipes/nip.jsonc",
+        "lines": "29",
+        "quote": "{ \"id\": \"gauge\", \"brewer\": \"gauger\", \"when\": \"recipe.testFirst\" },"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "recipe-08",
+    "kind": "recipe",
+    "question": "In a quick fix, if the code stops compiling or tests break after the fix is written, where does the work go?",
+    "answer": "The green step runs build, typecheck, lint, format and test; a failure goes back to Cellarman (the implement step), whichever step broke it, at most once, and the Finer then runs again.",
+    "sources": [
+      {
+        "path": "defaults/recipes/nip.jsonc",
+        "lines": "46-49",
+        "quote": "A failure goes back to Cellarman, whichever step broke it; the Finer then runs again."
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "recipe-09",
+    "kind": "recipe",
+    "question": "Is there a rule of thumb for how large each piece of a planned job should be?",
+    "answer": "The sizing lens checks that each sub-order is about 1,000 lines or one mechanism, so one batch can build it and a person can review it. That is a measure, not a limit: an entry a little past the mark that is plainly one mechanism is not reported.",
+    "sources": [
+      {
+        "path": "defaults/lenses/plan/sizing.md",
+        "lines": "3",
+        "quote": "Review whether each sub-order of the plan is about 1,000 lines or one mechanism"
+      },
+      {
+        "path": "defaults/lenses/plan/sizing.md",
+        "lines": "26",
+        "quote": "report an entry a little past the mark that is plainly one mechanism"
+      }
+    ],
+    "paraphrased": true,
+    "review": "model-triage"
+  },
+  {
+    "id": "recipe-10",
+    "kind": "recipe",
+    "question": "What does the necessity lens check, and what counts as proof that a safeguard is needed?",
+    "answer": "It reviews every safeguard a change adds (a guard, check step, retry, lock, review stage and the like) for proof that it is needed and not already done elsewhere. Proof is an observed failure (an issue, CI run, bug report, log or failing test) or a concrete path reachable today.",
+    "sources": [
+      {
+        "path": "defaults/lenses/diff/necessity.md",
+        "lines": "3",
+        "quote": "Review every safeguard the change adds for proof that it is needed and not already done elsewhere."
+      },
+      {
+        "path": "defaults/lenses/diff/necessity.md",
+        "lines": "11-13",
+        "quote": "Each new safeguard must name what it protects against"
+      }
+    ],
+    "paraphrased": false,
+    "review": "model-triage"
+  },
+  {
+    "id": "unanswerable-01",
+    "kind": "unanswerable",
+    "question": "If I report a security vulnerability privately, how many days until the maintainer responds or publishes a fix?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "SECURITY.md",
+        "why": "Line 5 says how to report privately and that the fix and advisory are worked out there before anything is public, but gives no response time, fix deadline or disclosure window."
+      }
+    ],
+    "note": "Grepped for respond, acknowledg, disclos, embargo, 'within N days': no timeline anywhere.",
+    "review": "model-triage"
+  },
+  {
+    "id": "unanswerable-02",
+    "kind": "unanswerable",
+    "question": "On what date is the public launch (milestone M3) planned?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "docs/milestones/README.md",
+        "why": "Line 19 lists M3 with its content, exit criterion and status Open; closed milestones have dates, open ones have no target date."
+      },
+      {
+        "path": "ROADMAP.md",
+        "why": "Line 10 describes M3's content and exit criterion, with no date."
+      }
+    ],
+    "review": "model-triage"
+  },
+  {
+    "id": "unanswerable-03",
+    "kind": "unanswerable",
+    "question": "Am I allowed to use the Foedrum logo or mascot in a blog post or a conference talk?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "docs/adr/0009-agpl-and-cla.md",
+        "why": "Line 11 says the name, logo and mascot are not covered by the code licence and that a trademark policy will govern their use; the policy itself is not written yet (ROADMAP.md line 10 lists it for M3)."
+      },
+      {
+        "path": "README.md",
+        "why": "Line 92 repeats that the name, logo and mascot are outside the code licence, without saying what use is allowed."
+      }
+    ],
+    "note": "A good answer refuses on the permission but may say a trademark policy is planned.",
+    "review": "model-triage"
+  },
+  {
+    "id": "unanswerable-04",
+    "kind": "unanswerable",
+    "question": "How many dollars does a typical batch of the nip recipe cost to brew?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "docs/adr/0181-receipts-show-no-cost.md",
+        "why": "Line 8 explains why Foedrum shows no dollar amount (each user pays by their own plan); it records tokens, not cost."
+      },
+      {
+        "path": "docs/adr/0224-the-default-recipes-taste-apart-or-together-as-a-seeded-comparison-measured.md",
+        "why": "Line 44 rejects cost in dollars as a measure; the docs give token counts per batch, never a price."
+      },
+      {
+        "path": "docs/adr/0172-an-attempt-s-receipt-from-its-stream.md",
+        "why": "Line 23 has an example receipt line with '$0.82 est.' for one attempt; it is an illustration, not a typical nip batch, and ADR 0181 superseded the cost parts."
+      },
+      {
+        "path": "docs/adr/0042-the-claude-command-line-and-stream-contract.md",
+        "why": "Line 8 says a spike of 18 small model calls cost 'a few cents'; that is not a nip batch."
+      }
+    ],
+    "note": "Token counts per batch do exist (e.g. ADR 0366's table); the question asks for dollars, which no document states.",
+    "review": "hand"
+  },
+  {
+    "id": "unanswerable-05",
+    "kind": "unanswerable",
+    "question": "Why was 3 chosen as the default open-order limit rather than some other number?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "docs/adr/0217-a-recipe-s-concurrency-and-the-open-order-limit-hold-what-the-intake-starts.md",
+        "why": "Line 51 gives the default 3 and says it was decided by the maintainer on 2026-10-26, with no reason; lines 80-81 use 'three' only as an example of what a limit of 3 would do; line 87 only rejects defaulting to the larger of 3 and concurrency."
+      },
+      {
+        "path": "docs/design/intake/limits.md",
+        "why": "Line 20 states the range 1 to 20 and default 3, without a reason."
+      }
+    ],
+    "note": "Borderline: an answer may cite the facts (maintainer's decision, date) but must not invent a rationale.",
+    "review": "hand"
+  },
+  {
+    "id": "unanswerable-06",
+    "kind": "unanswerable",
+    "question": "How big does the foedrum/state branch typically get after a few months of brewing?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "docs/adr/0035-the-process-runner-kills-at-an-output-limit.md",
+        "why": "Line 16 sizes the output limit of the state branch ls-tree (256 MiB, about 2.5 million files) but reports no observed size of a real state branch."
+      },
+      {
+        "path": "docs/adr/0011-state-in-the-brewery-repository.md",
+        "why": "Line 9 says what the branch holds per batch (an append-only events.jsonl and out docs), not how large it grows."
+      }
+    ],
+    "note": "ADR 0103 line 16 caps one out doc on the branch at 256 KiB; ADR 0030 line 25 says reads do not grow it. Neither gives a typical size.",
+    "review": "model-triage"
+  },
+  {
+    "id": "unanswerable-07",
+    "kind": "unanswerable",
+    "question": "What is the oldest version of Windows or macOS that Foedrum supports?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "README.md",
+        "why": "Lines 20-25 list the required Node, git, gh and Claude Code versions, but no operating system version."
+      },
+      {
+        "path": "docs/design/platform/cross-platform.md",
+        "why": "Line 5 says CI runs on ubuntu-latest, macos-latest and windows-latest; Windows 11 appears only as the machine of measurements (e.g. ADR 0002 line 24)."
+      }
+    ],
+    "note": "ADR 0076 line 84 mentions Ubuntu 24.04 for an AppArmor caveat, not as a minimum.",
+    "review": "model-triage"
+  },
+  {
+    "id": "unanswerable-08",
+    "kind": "unanswerable",
+    "question": "How many target repositories can one Brewery be configured to work on at most?",
+    "answer": null,
+    "sources": [],
+    "paraphrased": false,
+    "near": [
+      {
+        "path": "docs/design/recipes/configuration.md",
+        "why": "Lines 70-72 give the rules for repository keys and aliases (unique, alias at most 20 characters) but no cap on the number of repositories."
+      },
+      {
+        "path": "docs/adr/0008-polling-intake.md",
+        "why": "Line 16 says polling cost grows with the number of watched repositories, without a limit."
+      }
+    ],
+    "note": "Do not confuse with concurrency/openOrders (1 to 20) or the 20-character alias limit; neither caps repositories.",
+    "review": "model-triage"
+  }
+]
