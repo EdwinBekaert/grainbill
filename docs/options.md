@@ -85,5 +85,5 @@ The key comes from the environment only (`VOYAGE_API_KEY`).
 Claude is reached through headless Claude Code (`claude -p`), as Foedrum runs its brewers, rather than the API: no API key, the user's own Claude Code login.
 Each call replaces Claude Code's system prompt with ours (`--system-prompt`), has no tools (`--tools ""`), no settings, CLAUDE.md, hooks or MCP servers (`--safe-mode`, `--setting-sources ""`, `--strict-mcp-config`), saves no session, and reads its prompt on stdin; `--output-format json` gives the answer, the tokens and the models used.
 The process runner is injected, so tests run on captured output and never start `claude`.
-What this costs in cleanliness: Claude Code still tells the model about the machine it runs on. In the first answer run, answers assumed the asker was on Windows.
-The API over `fetch` (an `ANTHROPIC_API_KEY`) stays the way to remove that, and to let others run the evaluation without Claude Code.
+What this costs in cleanliness: Claude Code still tells the model about the machine it runs on. In the first answer run, answers assumed the asker was on Windows; a rule in the system prompt to assume nothing about the asker's machine removed that in the next run.
+The API over `fetch` (an `ANTHROPIC_API_KEY`) stays the way to remove it at the source, and to let others run the evaluation without Claude Code.

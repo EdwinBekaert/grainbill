@@ -89,20 +89,19 @@ Claude Haiku 5.5 (`claude-haiku-5-5`, through `claude -p`) answers all 50 questi
 
 | | Count | Share |
 |---|---|---|
-| unanswerable questions refused | 7 of 8 | 87.5% |
+| unanswerable questions refused | 8 of 8 | 100.0% |
 | answerable questions refused | 0 of 42 | 0.0% |
 | answerable questions with a source among the 5 passages | 35 of 42 | 83.3% |
-| answers citing a passage of a source | 32 of 42 | 76.2% |
-| sentences without a citation | 10 of 209 | 4.8% |
+| answers citing a passage of a source | 33 of 42 | 78.6% |
+| sentences without a citation | 11 of 211 | 5.2% |
 | citations naming no passage | 0 | |
 
 Whether an answer is right is not measured yet; a judge model comes next. What a read of the answers shows so far:
 
-- The one unanswerable question not counted as refused (unanswerable-05) is a partial refusal: it states what the documents record and says `NOT COVERED:` for the reason asked, mid-answer, where the count only looks at the start.
 - For the 7 answerable questions with no source among the passages, Haiku still answered, from nearby passages, mostly saying what those passages leave open.
-- Uncited sentences are mostly an opening "No." or a summary sentence cited in the next one.
-- Several answers assume the asker runs native Windows, which nothing in the prompt says: Claude Code passes the machine's details to the model even with its system prompt replaced (see [docs/options.md](docs/options.md#8-model-apis-fetch-for-voyage-headless-claude-code-for-claude)).
-- 50 calls took 210,569 tokens in and 51,768 out, reported by `claude -p` as $0.0674 of usage; answers are cached by model, system prompt and prompt.
+- Uncited sentences are mostly an opening "No." or a paragraph whose citations come at its end.
+- A first run, without the prompt's rule to assume nothing about the asker's machine, had several answers assume native Windows: Claude Code passes the machine's details to the model even with its system prompt replaced (see [docs/options.md](docs/options.md#8-model-apis-fetch-for-voyage-headless-claude-code-for-claude)). With the rule, no answer assumes a platform; Windows comes up only as one of the cases the passages state.
+- 50 calls took 212,719 tokens in and 54,552 out; answers are cached by model, system prompt and prompt.
 
 ## Run
 
