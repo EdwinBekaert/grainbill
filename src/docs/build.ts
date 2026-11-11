@@ -17,6 +17,8 @@ export type Corpus = { rev: string; revDate: string; passages: Passage[] };
 export type Question = {
   id: string;
   kind: string;
+  question: string;
+  paraphrased: boolean;
   sources: { path: string; lines: string }[];
 };
 
