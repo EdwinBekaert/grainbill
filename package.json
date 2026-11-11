@@ -11,6 +11,7 @@
     "index": "node src/build-index.ts",
     "eval:prepare": "node src/eval/prepare.ts",
     "eval": "node src/eval/run.ts",
+    "chunk": "node src/docs/build.ts",
     "mcp": "node src/mcp/server.ts",
     "demo": "node src/demo.ts",
     "test": "node --test \"test/**/*.test.ts\"",
