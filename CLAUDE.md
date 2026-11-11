@@ -22,4 +22,5 @@ M1 (done) is BM25 keyword search over code with an evaluation on real pull reque
 - **TypeScript** run directly by Node 24 (type stripping): `.ts` extensions in imports, `import type` for types, no enums, no parameter properties.
 - **Tests**: `node:test` and `node:assert/strict`; pure cores tested with plain data; no test reaches the network, an API or a login (inject `fetch`, use captured answers).
 - **Data**: `data/` is git-ignored scratch; `demo/snapshot/` is committed and must stay offline-usable and free of local paths and secrets. API keys only from the environment, never in files.
+- **Branches**: work on a branch in a worktree under `.claude/worktrees/`, never on `main`; changes reach `main` through a pull request, one per step of the milestone plan, linked to its issue.
 - **Git**: commit messages in the imperative with a short body saying why; no "Generated with" lines or Co-Authored-By trailers. Text files are LF (`.gitattributes`).
