@@ -1,10 +1,12 @@
-// BM25 over passages, the same scorer as M1's code search. A passage's breadcrumb title can be
-// searched with its text, and an ADR found can bring the later ADRs that changed it.
+// Search over passages: BM25, the same scorer as M1's code search, where a passage's breadcrumb
+// title can be searched with its text and an ADR found can bring the later ADRs that changed it;
+// and Voyage embeddings, ranked by cosine.
 
 import { Bm25 } from '../bm25.ts';
 import { tokenize } from '../tokenize.ts';
 import type { AdrGraph } from './adr-links.ts';
 import type { Passage } from './chunk.ts';
+import { dot } from './embed.ts';
 
 export const VARIANTS = ['text', 'title and text', 'title and text, then later ADRs'] as const;
 export type Variant = (typeof VARIANTS)[number];
@@ -55,4 +57,20 @@ export function withLaterAdrs(
   };
   for (const p of ranked) add(p);
   return out;
+}
+
+// What a passage is embedded as: its breadcrumb title and its text, as BM25 searches them.
+export const embeddingText = (p: Passage): string => `${p.title}\n${p.text}`;
+
+// Every passage by the cosine of its vector with the question's, best first. Vectors have length 1
+// and follow the order of `passages`; `queries` holds each question's vector.
+export function createDenseSearch(passages: Passage[], vectors: Float32Array[], queries: Map<string, Float32Array>): Search {
+  return (question) => {
+    const q = queries.get(question);
+    if (!q) throw new Error(`no vector for the question "${question}"`);
+    return passages
+      .map((p, i) => ({ p, s: dot(q, vectors[i] as Float32Array) }))
+      .sort((a, b) => b.s - a.s || (a.p.id < b.p.id ? -1 : 1))
+      .map((x) => x.p);
+  };
 }

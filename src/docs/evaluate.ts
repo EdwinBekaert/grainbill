@@ -1,4 +1,8 @@
 // node src/docs/evaluate.ts [--passages data/passages.json] [--questions eval/questions.jsonc]
+//                           [--cache data/embeddings.json] [--embed]
+//
+// Embeddings come from the cache; only with --embed does it send what is not cached to Voyage
+// (VOYAGE_API_KEY), and without it a run says what it would send and leaves the row out.
 //
 // How well each search finds the question set's sources among the passages `npm run chunk` wrote.
 // A source is found when a passage it overlaps is in the top k: the answer is built from the top 5,
@@ -10,7 +14,8 @@ import { parseArgs } from 'node:util';
 import { type AdrGraph, adrGraph } from './adr-links.ts';
 import { adrStatuses, type Corpus, passagesOf, type Question, readQuestions } from './build.ts';
 import type { Passage } from './chunk.ts';
-import { createSearch, VARIANTS } from './search.ts';
+import { EmbeddingCache, embedAll, MODEL, uncached } from './embed.ts';
+import { createDenseSearch, createSearch, embeddingText, type Search, VARIANTS } from './search.ts';
 import { mean } from '../eval/metrics.ts';
 
 export const POOL = 30;
@@ -37,15 +42,21 @@ export const reciprocal = (ranks: number[]): number => {
 
 export type Row = { name: string; cases: Ranks[] };
 
-export function evaluateSearch(passages: Passage[], questions: Question[], graph: AdrGraph): Row[] {
-  const answerable = questions.filter((q) => q.sources.length > 0);
-  return VARIANTS.map((variant) => {
-    const search = createSearch(passages, variant, graph);
-    return {
-      name: `BM25 over ${variant}`,
-      cases: answerable.map((q) => ({ question: q, ranks: sourceRanks(passages, q, search(q.question)) })),
-    };
+// Embeddings, when given: each passage's vector in the order of `passages`, and each question's.
+export type Dense = { model: string; vectors: Float32Array[]; queries: Map<string, Float32Array> };
+
+export function answerable(questions: Question[]): Question[] {
+  return questions.filter((q) => q.sources.length > 0);
+}
+
+export function evaluateSearch(passages: Passage[], questions: Question[], graph: AdrGraph, dense?: Dense): Row[] {
+  const row = (name: string, search: Search): Row => ({
+    name,
+    cases: answerable(questions).map((q) => ({ question: q, ranks: sourceRanks(passages, q, search(q.question)) })),
   });
+  const rows = VARIANTS.map((variant) => row(`BM25 over ${variant}`, createSearch(passages, variant, graph)));
+  if (dense) rows.push(row(`${dense.model} over title and text`, createDenseSearch(passages, dense.vectors, dense.queries)));
+  return rows;
 }
 
 const pct = (x: number): string => `${(x * 100).toFixed(1)}%`;
@@ -90,9 +101,31 @@ if (import.meta.main) {
     options: {
       passages: { type: 'string', default: 'data/passages.json' },
       questions: { type: 'string', default: 'eval/questions.jsonc' },
+      cache: { type: 'string', default: 'data/embeddings.json' },
+      embed: { type: 'boolean', default: false },
     },
   });
   const corpus = JSON.parse(readFileSync(values.passages, 'utf8')) as Corpus;
+  const questions = readQuestions(values.questions);
   const graph = adrGraph(adrStatuses(corpus.passages));
-  console.log(tables(corpus, evaluateSearch(corpus.passages, readQuestions(values.questions), graph)));
+  const cache = new EmbeddingCache(values.cache);
+  const docs = corpus.passages.map(embeddingText);
+  const asked = answerable(questions).map((q) => q.question);
+  const missing = [uncached(cache, MODEL, 'document', docs), uncached(cache, MODEL, 'query', asked)];
+  const count = missing.reduce((n, m) => n + m.texts.length, 0);
+  const tokens = missing.reduce((n, m) => n + m.tokens, 0);
+  let dense: Dense | undefined;
+  if (count === 0 || values.embed) {
+    const apiKey = process.env.VOYAGE_API_KEY;
+    const d = await embedAll(cache, docs, 'document', { apiKey });
+    const q = await embedAll(cache, asked, 'query', { apiKey });
+    if (count > 0) console.log(`Embedded ${count} texts with ${MODEL}: ${d.tokens + q.tokens} tokens.\n`);
+    dense = { model: MODEL, vectors: d.vectors, queries: new Map(asked.map((t, i) => [t, q.vectors[i] as Float32Array])) };
+  } else {
+    console.log(
+      `${MODEL} row left out: ${count} texts are not cached (about ${tokens.toLocaleString('en')} tokens). ` +
+        'Run with --embed and VOYAGE_API_KEY set to embed them.\n',
+    );
+  }
+  console.log(tables(corpus, evaluateSearch(corpus.passages, questions, graph, dense)));
 }

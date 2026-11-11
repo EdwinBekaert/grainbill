@@ -74,3 +74,11 @@ Revisit if the server needs the HTTP transport, resources or prompts.
 
 The remaining dev packages are held by Foedrum's `.npmrc`: `ignore-scripts` (install hooks are where most npm attacks run code), `min-release-age=7` (a hijacked release is usually pulled within days, before it can resolve here), `save-exact`, and no git or URL dependencies.
 Install with `npm ci`, check with `npm audit signatures`.
+
+## 8. Model APIs over `fetch`
+
+Voyage (embeddings, and the reranker to come) and Claude are called with Node's `fetch`, not their SDKs.
+Each call is one JSON POST with a bearer key; what an SDK adds (retries, types, streaming) is a few lines here, or not needed, and the dependency rule above stays at zero.
+`fetch` is injected, so tests run on captured answers and never reach the network.
+Keys come from the environment only (`VOYAGE_API_KEY`, `ANTHROPIC_API_KEY`).
+Revisit if a feature needs what is hard to write by hand, such as Claude's streaming with tool use.
