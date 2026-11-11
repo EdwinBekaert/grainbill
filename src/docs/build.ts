@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { commitDate, listFiles, readFiles, resolveRev } from '../git.ts';
+import { type AdrGraph, adrGraph, type Link, successors } from './adr-links.ts';
 import { chunk, kindOf, type Passage } from './chunk.ts';
 import { parseJsonc, plain } from './jsonc.ts';
 
@@ -60,6 +61,35 @@ export function report(corpus: Corpus, questions: Question[]): string {
     `Question sources: ${counts.length}; inside one passage ${by((c) => c === 1)}, ` +
       `over two ${by((c) => c === 2)}, over three or more ${by((c) => c >= 3)}, on no passage ${by((c) => c === 0)}.`,
   );
+  out.push('', adrReport(adrGraph(adrStatuses(corpus.passages)), questions));
+  return out.join('\n');
+}
+
+// Each ADR's status line, by number.
+export function adrStatuses(passages: Passage[]): Map<string, string> {
+  return new Map(passages.flatMap((p) => (p.adr ? [[p.adr.number, p.adr.status] as const] : [])));
+}
+
+const adrOf = (path: string) => /^docs\/adr\/(\d{4})-/.exec(path)?.[1];
+
+// The links by kind, and whether each amended question's later ADR is found from its earlier one.
+export function adrReport(graph: AdrGraph, questions: Question[]): string {
+  const count = (f: (l: Link) => boolean) => graph.links.filter(f).length;
+  const out = [
+    `ADR links: ${graph.links.length} (amends ${count((l) => l.kind === 'amends')}, ` +
+      `supersedes ${count((l) => l.kind === 'supersedes' && !l.partly)}, partly supersedes ${count((l) => !!l.partly)}, ` +
+      `generalises ${count((l) => l.kind === 'generalises')}, extends ${count((l) => l.kind === 'extends')}); ` +
+      `${count((l) => l.scopes.length > 0)} say what they change, ${graph.oneSided.length} are stated by one of their two ADRs only, ` +
+      `${graph.later.size} ADRs were changed by a later one.`,
+  ];
+  const amended = questions.filter((q) => q.kind === 'amended');
+  const found = amended.filter((q) => {
+    const ns = [...new Set(q.sources.map((s) => adrOf(s.path)).filter((n) => n !== undefined))];
+    // The cited ADR that no other cited ADR changed is the earlier one; every other must follow it.
+    const earliest = ns.filter((n) => !ns.some((m) => successors(graph, m).includes(n)));
+    return earliest.length === 1 && ns.every((n) => n === earliest[0] || successors(graph, earliest[0] as string).includes(n));
+  });
+  out.push(`Amended questions whose later cited ADRs all follow the earlier one in the graph: ${found.length} of ${amended.length}.`);
   return out.join('\n');
 }
 
