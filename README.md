@@ -13,8 +13,8 @@ Built for [Foedrum](https://github.com/EdwinBekaert/foedrum), whose planner has 
 
 ## What it is not
 
-- Not RAG: nothing generates an answer from what is found. Claude may, after calling the tool, but that is not built or measured here.
-- No embeddings, no chunking beyond one blob per file, no reranking, no model of any kind.
+- Not RAG yet: nothing generates an answer from what is found. Claude may, after calling the tool, but that is not built or measured here.
+- The code search uses no embeddings, no chunking beyond one blob per file, no reranking, no model of any kind. The document search of M2 so far has BM25 and Voyage embeddings, measured separately; there is no fusion or reranker yet.
 - Not a strong result: there are only 9 folders, and always answering with the three busiest already finds 70% of them.
 
 ## What it demonstrates
@@ -61,6 +61,7 @@ The 42 answerable questions of [eval/questions.jsonc](eval/questions.jsonc) (97 
 | BM25 over passage text | 20.2% | 9.5% | 43.3% | 0.26 |
 | BM25 over breadcrumb title and text | 27.0% | 19.0% | 49.4% | 0.30 |
 | the same, each ADR followed by the ADRs that later changed it | 23.8% | 16.7% | 28.2% | 0.25 |
+| Voyage `voyage-4` embeddings of title and text, by cosine | 50.8% | 35.7% | 74.2% | 0.46 |
 
 Recall@k: the share of a question's sources with a passage in the top k (the answer is to be built from the top 5; a reranker would reorder the top 30).
 All@5: every source of the question in the top 5.
@@ -70,7 +71,10 @@ What the numbers say:
 
 - Keyword search alone finds a quarter of the sources an answer needs. It finds 46.5% for questions that share words with their source, and 10.9% for the 23 worded with few of them.
 - Following the links between ADRs made it worse: an ADR in the results brings every ADR that later changed it, and those push the other sources down (design-01's source falls from rank 4 to 261). For the 10 amended questions it changed nothing at 5, since the older ADR is rarely in the top 5 to begin with.
+- Embeddings find about twice as many sources as keyword search at 5 (50.8% against 27.0%), and three times as many for the paraphrased questions (35.9% against 10.9%). They also do better on the questions that share words with their source (68.9% against 46.5%).
+- By kind, at 5: why 85.0%, design 52.8%, recipe 41.7%, amended 23.3%. Amended questions stay hardest: they need both the older ADR and the one that changed it.
 - The questions were written from their sources, so the literal ones favour keyword search; the paraphrased split shows how much.
+- Embedding the 3,561 passages and 42 questions took 930,293 tokens, within Voyage's free allowance for `voyage-4`; vectors are cached by content, so a later run sends nothing.
 
 ## Run
 
@@ -87,7 +91,8 @@ npm run eval
 
 # Search Foedrum's documents for the question set's sources
 npm run chunk -- --repo ../foedrum --rev 2d64a6e3904c8f514efa135237035c45ae42a57a
-npm run eval:docs
+npm run eval:docs                 # BM25 rows; embeddings only from the cache
+npm run eval:docs -- --embed      # also embeds what is not cached (VOYAGE_API_KEY)
 
 # Use it in Claude Code
 npm run index -- --repo ../foedrum --name EdwinBekaert/foedrum --rev origin/main
