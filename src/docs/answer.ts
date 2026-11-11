@@ -12,10 +12,10 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { type Corpus, passagesOf, type Question, readQuestions } from './build.ts';
 import type { Passage } from './chunk.ts';
-import { askClaude, type Reply } from './claude.ts';
+import { askClaude, type Reply, type Run } from './claude.ts';
 import { EmbeddingCache } from './embed.ts';
 import { RerankCache } from './rerank.ts';
-import { createRetriever } from './retrieve.ts';
+import { createRetriever, type Retriever } from './retrieve.ts';
 
 export const ANSWER_MODEL = 'claude-haiku-5-5';
 
@@ -133,6 +133,40 @@ export function report(all: Passage[], answers: Answered[], model: string): stri
   ].join('\n');
 }
 
+// Each question's passages and answer, from the cache, or from Claude when `ask` is set. Questions
+// whose passages or answer are not to be had are counted, not answered.
+export async function answerAll(
+  questions: Question[],
+  retrieve: Retriever,
+  cache: AnswerCache,
+  opts: { model: string; ask: boolean; run?: Run },
+): Promise<{ answers: Answered[]; missing: number; unretrieved: number }> {
+  const answers: Answered[] = [];
+  let missing = 0;
+  let unretrieved = 0;
+  for (const question of questions) {
+    const passages = await retrieve(question.question).catch(() => undefined);
+    if (!passages) {
+      unretrieved++;
+      continue;
+    }
+    const prompt = answerPrompt(question.question, passages);
+    const key = answerKey(opts.model, SYSTEM, prompt);
+    let reply = cache.get(key);
+    if (!reply && opts.ask) {
+      reply = await askClaude(prompt, { model: opts.model, system: SYSTEM, ...(opts.run ? { run: opts.run } : {}) });
+      cache.set(key, reply);
+      console.log(`${question.id}: ${reply.usage.outputTokens} tokens out`);
+    }
+    if (!reply) {
+      missing++;
+      continue;
+    }
+    answers.push({ question, passages, reply, parsed: parseAnswer(reply.text, passages.length) });
+  }
+  return { answers, missing, unretrieved };
+}
+
 if (import.meta.main) {
   const { values } = parseArgs({
     options: {
@@ -152,30 +186,10 @@ if (import.meta.main) {
     { embeddings: new EmbeddingCache('data/embeddings.json'), reranks: new RerankCache('data/reranks.json') },
     values.voyage ? { apiKey: process.env.VOYAGE_API_KEY } : {},
   );
-  const cache = new AnswerCache(values.out);
-  const answers: Answered[] = [];
-  let missing = 0;
-  let unretrieved = 0;
-  for (const question of questions) {
-    const passages = await retrieve(question.question).catch(() => undefined);
-    if (!passages) {
-      unretrieved++;
-      continue;
-    }
-    const prompt = answerPrompt(question.question, passages);
-    const key = answerKey(values.model, SYSTEM, prompt);
-    let reply = cache.get(key);
-    if (!reply && values.claude) {
-      reply = await askClaude(prompt, { model: values.model, system: SYSTEM });
-      cache.set(key, reply);
-      console.log(`${question.id}: ${reply.usage.outputTokens} tokens out`);
-    }
-    if (!reply) {
-      missing++;
-      continue;
-    }
-    answers.push({ question, passages, reply, parsed: parseAnswer(reply.text, passages.length) });
-  }
+  const { answers, missing, unretrieved } = await answerAll(questions, retrieve, new AnswerCache(values.out), {
+    model: values.model,
+    ask: values.claude,
+  });
   if (unretrieved > 0) console.log(`${unretrieved} questions are not embedded or reranked yet; run with --voyage.`);
   if (missing > 0) console.log(`${missing} questions have no cached answer; run with --claude to ask ${values.model}.\n`);
   if (answers.length > 0) console.log(report(corpus.passages, answers, values.model));
