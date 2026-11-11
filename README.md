@@ -13,8 +13,8 @@ Built for [Foedrum](https://github.com/EdwinBekaert/foedrum), whose planner has 
 
 ## What it is not
 
-- Not RAG yet: nothing generates an answer from what is found. Claude may, after calling the tool, but that is not built or measured here.
-- The code search uses no embeddings, no chunking beyond one blob per file, no reranking, no model of any kind. The document search of M2 so far finds passages (BM25, Voyage embeddings, their fusion, a reranker); it does not answer yet.
+- The code search (M1) is not RAG: nothing generates an answer from what it finds, and it uses no embeddings, no chunking beyond one blob per file, no reranking, no model of any kind.
+- The document answers (M2) are generated and cited, but not yet judged for correctness, and not yet reachable over MCP.
 - Not a strong result: there are only 9 folders, and always answering with the three busiest already finds 70% of them.
 
 ## What it demonstrates
@@ -83,6 +83,27 @@ What the numbers say:
 - Fusion's constant k = 60 is the usual one, not tuned: these 42 questions are the only test, and tuning on them would overstate the result.
 - Embedding the 3,561 passages and 42 questions took 930,293 tokens, within Voyage's free allowance for `voyage-4`; vectors are cached by content, so a later run sends nothing. Reranking sends 84 pools of 30 (about 690,000 tokens by the run's estimate); the orders are cached too.
 
+### M2: answers from the top 5 passages
+
+Claude Haiku 5.5 (`claude-haiku-5-5`, through `claude -p`) answers all 50 questions from the 5 passages of the best search above (fusion, reranked), citing a passage after every sentence or replying `NOT COVERED:` when the passages do not answer. Run on 2026-11-11, Foedrum at `2d64a6e3`.
+
+| | Count | Share |
+|---|---|---|
+| unanswerable questions refused | 7 of 8 | 87.5% |
+| answerable questions refused | 0 of 42 | 0.0% |
+| answerable questions with a source among the 5 passages | 35 of 42 | 83.3% |
+| answers citing a passage of a source | 32 of 42 | 76.2% |
+| sentences without a citation | 10 of 209 | 4.8% |
+| citations naming no passage | 0 | |
+
+Whether an answer is right is not measured yet; a judge model comes next. What a read of the answers shows so far:
+
+- The one unanswerable question not counted as refused (unanswerable-05) is a partial refusal: it states what the documents record and says `NOT COVERED:` for the reason asked, mid-answer, where the count only looks at the start.
+- For the 7 answerable questions with no source among the passages, Haiku still answered, from nearby passages, mostly saying what those passages leave open.
+- Uncited sentences are mostly an opening "No." or a summary sentence cited in the next one.
+- Several answers assume the asker runs native Windows, which nothing in the prompt says: Claude Code passes the machine's details to the model even with its system prompt replaced (see [docs/options.md](docs/options.md#8-model-apis-fetch-for-voyage-headless-claude-code-for-claude)).
+- 50 calls took 210,569 tokens in and 51,768 out, reported by `claude -p` as $0.0674 of usage; answers are cached by model, system prompt and prompt.
+
 ## Run
 
 Node 24 or newer.
@@ -101,6 +122,8 @@ npm run chunk -- --repo ../foedrum --rev 2d64a6e3904c8f514efa135237035c45ae42a57
 npm run eval:docs                 # BM25 rows; embeddings only from the cache
 npm run eval:docs -- --embed      # also embeds what is not cached (VOYAGE_API_KEY)
 npm run eval:docs -- --rerank     # also reranks what is not cached (VOYAGE_API_KEY)
+npm run answer                    # answers from the cache only
+npm run answer -- --claude        # asks Claude (claude -p) for answers not cached; --voyage for new questions
 
 # Use it in Claude Code
 npm run index -- --repo ../foedrum --name EdwinBekaert/foedrum --rev origin/main

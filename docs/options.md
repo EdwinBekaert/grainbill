@@ -75,10 +75,15 @@ Revisit if the server needs the HTTP transport, resources or prompts.
 The remaining dev packages are held by Foedrum's `.npmrc`: `ignore-scripts` (install hooks are where most npm attacks run code), `min-release-age=7` (a hijacked release is usually pulled within days, before it can resolve here), `save-exact`, and no git or URL dependencies.
 Install with `npm ci`, check with `npm audit signatures`.
 
-## 8. Model APIs over `fetch`
+## 8. Model APIs: `fetch` for Voyage, headless Claude Code for Claude
 
-Voyage (embeddings, and the reranker to come) and Claude are called with Node's `fetch`, not their SDKs.
-Each call is one JSON POST with a bearer key; what an SDK adds (retries, types, streaming) is a few lines here, or not needed, and the dependency rule above stays at zero.
+Voyage (embeddings and the reranker) is called with Node's `fetch`, not its SDK.
+Each call is one JSON POST with a bearer key; what an SDK adds (retries, types) is a few lines here, and the dependency rule above stays at zero.
 `fetch` is injected, so tests run on captured answers and never reach the network.
-Keys come from the environment only (`VOYAGE_API_KEY`, `ANTHROPIC_API_KEY`).
-Revisit if a feature needs what is hard to write by hand, such as Claude's streaming with tool use.
+The key comes from the environment only (`VOYAGE_API_KEY`).
+
+Claude is reached through headless Claude Code (`claude -p`), as Foedrum runs its brewers, rather than the API: no API key, the user's own Claude Code login.
+Each call replaces Claude Code's system prompt with ours (`--system-prompt`), has no tools (`--tools ""`), no settings, CLAUDE.md, hooks or MCP servers (`--safe-mode`, `--setting-sources ""`, `--strict-mcp-config`), saves no session, and reads its prompt on stdin; `--output-format json` gives the answer, the tokens and the models used.
+The process runner is injected, so tests run on captured output and never start `claude`.
+What this costs in cleanliness: Claude Code still tells the model about the machine it runs on. In the first answer run, answers assumed the asker was on Windows.
+The API over `fetch` (an `ANTHROPIC_API_KEY`) stays the way to remove that, and to let others run the evaluation without Claude Code.
