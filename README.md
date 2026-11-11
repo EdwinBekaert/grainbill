@@ -14,7 +14,7 @@ Built for [Foedrum](https://github.com/EdwinBekaert/foedrum), whose planner has 
 ## What it is not
 
 - The code search (M1) is not RAG: nothing generates an answer from what it finds, and it uses no embeddings, no chunking beyond one blob per file, no reranking, no model of any kind.
-- The document answers (M2) are generated and cited, but not yet judged for correctness, and not yet reachable over MCP.
+- The document answers (M2) are generated, cited and judged by a model, but no person checked the judge, and they are not yet reachable over MCP.
 - Not a strong result: there are only 9 folders, and always answering with the three busiest already finds 70% of them.
 
 ## What it demonstrates
@@ -34,7 +34,7 @@ Built for [Foedrum](https://github.com/EdwinBekaert/foedrum), whose planner has 
 - **Hybrid retrieval**: lexical and dense search merged by reciprocal rank fusion, then a cross-encoder reranker, each stage measured.
 - **Grounded generation**: answers only from retrieved passages, a citation for every claim, and a refusal when the documents do not cover the question.
 - **Stale knowledge**: decisions superseded by later ones, resolved through the links between documents.
-- **Evaluating answers, not just search**: correctness, faithfulness and refusals judged by a model, checked by hand on a sample.
+- **Evaluating answers, not just search**: correctness, faithfulness and refusals judged by a model (no person checks the verdicts).
 - **Cost control**: cheap models where they suffice, cached embeddings and answers, cents per evaluation run.
 
 ## Milestones
@@ -96,12 +96,38 @@ Claude Haiku 5.5 (`claude-haiku-5-5`, through `claude -p`) answers all 50 questi
 | sentences without a citation | 11 of 211 | 5.2% |
 | citations naming no passage | 0 | |
 
-Whether an answer is right is not measured yet; a judge model comes next. What a read of the answers shows so far:
+What a read of the answers shows:
 
 - For the 7 answerable questions with no source among the passages, Haiku still answered, from nearby passages, mostly saying what those passages leave open.
 - Uncited sentences are mostly an opening "No." or a paragraph whose citations come at its end.
 - A first run, without the prompt's rule to assume nothing about the asker's machine, had several answers assume native Windows: Claude Code passes the machine's details to the model even with its system prompt replaced (see [docs/options.md](docs/options.md#8-model-apis-fetch-for-voyage-headless-claude-code-for-claude)). With the rule, no answer assumes a platform; Windows comes up only as one of the cases the passages state.
 - 50 calls took 212,719 tokens in and 54,552 out; answers are cached by model, system prompt and prompt.
+
+### M2: the answers judged
+
+Claude Sonnet 5.5 (`claude-sonnet-5-5`, through `claude -p`) judges each answer above against the question set's reference answer and the 5 passages the answer was given: whether it is right, whether every claim is stated by the passages, whether an amended question got the rule that holds now, and whether it refused. Run on 2026-11-11.
+
+**No person checked the judge's verdicts.** The numbers below are one model's reading of another's answers, on a question set written with a model of the same family; they show where answers go wrong, not a verified accuracy.
+
+| Questions | Correct | Partly | Wrong | Faithful to the passages |
+|---|---|---|---|---|
+| answerable (42) | 71.4% | 23.8% | 4.8% | 88.1% |
+| design (12) | 75.0% | 16.7% | 8.3% | 91.7% |
+| why (10) | 80.0% | 20.0% | 0.0% | 100.0% |
+| amended (10) | 80.0% | 20.0% | 0.0% | 90.0% |
+| recipe (10) | 50.0% | 40.0% | 10.0% | 70.0% |
+| paraphrased (23) | 56.5% | 34.8% | 8.7% | 87.0% |
+| not paraphrased (19) | 89.5% | 10.5% | 0.0% | 89.5% |
+| unanswerable (8), refused | 100.0% | | | 100.0% |
+
+What the verdicts say:
+
+- Retrieval decides most of it. With a source among the 5 passages, 29 of 35 answers are correct, 6 partly and none wrong; without one, 1 of 7 is correct, 4 partly and 2 wrong.
+- 9 of 10 amended questions get the rule that holds now, by the judge; for the tenth (amended-08) it gave no reading of that point ("n/a") while judging the answer correct and faithful.
+- 13 claims in 5 answers are not stated by their passages: mostly an answer stretching a passage about a nearby case to the question asked, or naming an ADR's amendment history beyond what the status lines say. The judge also lists some omissions there, which are not claims.
+- Recipe questions fare worst: a recipe's answer is spread over several steps, and the 5 passages often hold only some of them.
+- A first judge run left the ADR status lines out of the passages it showed the judge, though the answers had them; it then called claims such as "ADR 0076 amends ADR 0069" unsupported and put faithfulness at 66.7%. The judge now sees the passages exactly as the answer did; only that run is reported above.
+- 50 verdicts took 238,352 tokens in and 10,249 out; they are cached like the answers.
 
 ## Run
 
@@ -123,6 +149,8 @@ npm run eval:docs -- --embed      # also embeds what is not cached (VOYAGE_API_K
 npm run eval:docs -- --rerank     # also reranks what is not cached (VOYAGE_API_KEY)
 npm run answer                    # answers from the cache only
 npm run answer -- --claude        # asks Claude (claude -p) for answers not cached; --voyage for new questions
+npm run judge                     # verdicts from the cache only
+npm run judge -- --claude         # asks the judge (claude -p) for verdicts not cached
 
 # Use it in Claude Code
 npm run index -- --repo ../foedrum --name EdwinBekaert/foedrum --rev origin/main

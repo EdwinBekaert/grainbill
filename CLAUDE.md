@@ -13,6 +13,7 @@ M1 (done) is BM25 keyword search over code with an evaluation on real pull reque
 - `npm run chunk -- --repo ../foedrum --rev origin/main`: cut Foedrum's documents into passages (`data/passages.json`) and report how the question set's citations fall on them, and the links between ADRs
 - `npm run eval:docs [-- --embed] [--rerank]`: score each search of the passages on the question set's sources; embeddings and rerankings come from `data/embeddings.json` and `data/reranks.json`, and only `--embed` or `--rerank` sends what is not cached to Voyage (`VOYAGE_API_KEY`, costs money past the free allowance: ask first)
 - `npm run answer [-- --claude] [--voyage] [--only <ids>]`: answer the question set from the top 5 passages with Claude Haiku 5.5 through `claude -p`; answers come from `data/answers.json`, and only `--claude` calls Claude (the user's Claude Code login: ask first)
+- `npm run judge [-- --claude] [--voyage]`: Claude Sonnet 5.5 judges the cached answers through `claude -p`; verdicts come from `data/verdicts.json`, and only `--claude` calls Claude (ask first). No person checks the verdicts, and the README says so
 - `npm run index -- --repo ../foedrum --name EdwinBekaert/foedrum --rev origin/main`: an index of current code for the MCP server
 - Run `npm test` and `npm run typecheck` before every commit.
 
