@@ -1,9 +1,11 @@
 // npm run demo [-- --no-pause] [--data demo/snapshot]
 //
-// A guided walk-through, offline: no gh, no login, no network. It reads a frozen snapshot of
-// Foedrum's issues and an index built before them, picks one real issue, shows Grain Bill's answer
-// beside what the pull request actually changed and beside the baseline, prints the evaluation
-// over all cases, and last talks to the real MCP server over stdio, as Claude Code would.
+// A guided walk-through, offline: no gh, no login, no network, no model. It reads a frozen snapshot
+// of Foedrum's issues and an index built before them, picks one real issue, shows Grain Bill's
+// answer beside what the pull request actually changed and beside the baseline, and prints the
+// evaluation over all cases. Then a question answered from Foedrum's documents, one they cannot
+// answer, and the judged answers over the question set, from the frozen answers. Last it talks to
+// the real MCP server over stdio, as Claude Code would.
 
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -13,6 +15,7 @@ import { createInterface as createPrompt } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, styleText } from 'node:util';
 import type { Index } from './cards.ts';
+import type { DocsSnapshot, Entry } from './docs/ask.ts';
 import type { Case } from './eval/cases.ts';
 import { type EvalCase, evaluate, table } from './eval/evaluate.ts';
 import { recallAt } from './eval/metrics.ts';
@@ -132,17 +135,86 @@ async function main(): Promise<void> {
   console.log(dim('\n  Hit@1: the first module is right. Recall@k: the share of changed modules in the top k.'));
   console.log(dim('  F2 weighs recall four times precision: a module a plan misses costs more than an extra one.'));
 
+  const docsPath = join(values.data, 'docs.json');
+  const docs = JSON.parse(readFileSync(docsPath, 'utf8')) as DocsSnapshot;
+  const asked = pickAnswer(docs);
+  const refused = docs.entries.find((e) => e.kind === 'unanswerable');
+  if (asked === undefined || refused === undefined) throw new Error('no answer in the snapshot to show');
+
+  await section("A question answered from Foedrum's documents");
+  console.log(`  ${styleText('bold', asked.question)}\n`);
+  for (const line of wrap(asked.answer, 100)) console.log(`  │ ${line}`);
+  console.log('');
+  for (const [i, p] of asked.passages.entries()) console.log(`  ${dim(`[${i + 1}]`)} ${p.title} ${dim(`${p.path}:${p.start}-${p.end}`)}`);
+  console.log(dim(`\n  ${docs.answerModel} wrote it from these 5 passages, found by keyword search and embeddings fused, then reranked.`));
+  if (asked.kind === 'amended') console.log(dim('  An older ADR said otherwise; the answer gives the rule that holds now and cites both.'));
+  console.log(`\n  ${dim(`${docs.judgeModel}'s verdict:`)} correct: ${asked.verdict.correct}, faithful to the passages: ${asked.verdict.faithful}`);
+
+  await section('A question the documents cannot answer');
+  console.log(`  ${styleText('bold', refused.question)}\n`);
+  for (const line of wrap(refused.answer, 100)) console.log(`  │ ${line}`);
+
+  await section(`Across ${docs.entries.length} questions`);
+  for (const line of docsTable(docs)) console.log(`  ${line}`);
+  console.log(dim(`\n  Verdicts by ${docs.judgeModel}; no person checked them. More in docs/results.md.`));
+
   await section('Over MCP, as Claude Code calls it');
-  await mcpExchange(indexPath, showcase);
-  console.log(`\n  Add it to Claude Code:\n`);
-  console.log(`    claude mcp add grainbill -- node ${join(ROOT, 'src', 'mcp', 'server.ts')} ${join(ROOT, 'data', 'index.json')}`);
-  console.log(dim('\n  (build data/index.json of the current code first: npm run index -- --repo <path> --rev origin/main)\n'));
+  await mcpExchange(indexPath, docsPath, showcase, asked.question);
+  console.log(`\n  Add it to Claude Code (ask answers any question live, with VOYAGE_API_KEY and claude on PATH):\n`);
+  console.log(
+    `    claude mcp add grainbill -- node ${join(ROOT, 'src', 'mcp', 'server.ts')} ${join(ROOT, 'data', 'index.json')} --live ${join(ROOT, 'data')}`,
+  );
+  console.log(dim('\n  (build data/ first: npm run index, npm run chunk, npm run eval:docs -- --embed)\n'));
   prompt?.close();
 }
 
-// Starts the real server, sends three JSON-RPC messages and shows what goes each way.
-async function mcpExchange(indexPath: string, showcase: EvalCase): Promise<void> {
-  const server = spawn(process.execPath, [join(ROOT, 'src', 'mcp', 'server.ts'), indexPath], {
+// The answer the demo tells: an amended question answered right, faithfully, with the rule that
+// holds now, from passages that held its source.
+export function pickAnswer(docs: DocsSnapshot): Entry | undefined {
+  const good = (e: Entry) => e.sourceHit && e.verdict.correct === 'yes' && e.verdict.faithful === 'yes';
+  return (
+    docs.entries.find((e) => e.kind === 'amended' && good(e) && e.verdict.current === 'yes' && e.answer.length < 900) ??
+    docs.entries.find(good)
+  );
+}
+
+// The verdicts over the set, by group, and by whether a source was among the 5 passages.
+export function docsTable(docs: DocsSnapshot): string[] {
+  const answerable = docs.entries.filter((e) => e.kind !== 'unanswerable');
+  const share = (es: Entry[], f: (e: Entry) => boolean) => (es.length === 0 ? '-' : `${((100 * es.filter(f).length) / es.length).toFixed(1)}%`);
+  const row = (name: string, es: Entry[]) =>
+    `| ${name} (${es.length}) | ${share(es, (e) => e.verdict.correct === 'yes')} | ${share(es, (e) => e.verdict.correct === 'partly')} | ` +
+    `${share(es, (e) => e.verdict.correct === 'no')} | ${share(es, (e) => e.verdict.faithful === 'yes')} |`;
+  const unanswerable = docs.entries.filter((e) => e.kind === 'unanswerable');
+  return [
+    '| Questions | Correct | Partly | Wrong | Faithful |',
+    '|---|---|---|---|---|',
+    row('answerable', answerable),
+    row('a source among the 5 passages', answerable.filter((e) => e.sourceHit)),
+    row('no source among them', answerable.filter((e) => !e.sourceHit)),
+    `| unanswerable, refused (${unanswerable.length}) | ${share(unanswerable, (e) => e.verdict.refused === 'yes')} | | | |`,
+  ];
+}
+
+// Words to lines of at most `width` characters.
+export function wrap(text: string, width: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split(/\n+/)) {
+    let line = '';
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      if (line !== '' && line.length + 1 + word.length > width) {
+        lines.push(line);
+        line = word;
+      } else line = line === '' ? word : `${line} ${word}`;
+    }
+    if (line !== '') lines.push(line);
+  }
+  return lines;
+}
+
+// Starts the real server on the snapshot, sends four JSON-RPC messages and shows what goes each way.
+async function mcpExchange(indexPath: string, docsPath: string, showcase: EvalCase, question: string): Promise<void> {
+  const server = spawn(process.execPath, [join(ROOT, 'src', 'mcp', 'server.ts'), indexPath, '--docs', docsPath], {
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   const replies = createInterface({ input: server.stdout })[Symbol.asyncIterator]();
@@ -151,10 +223,12 @@ async function mcpExchange(indexPath: string, showcase: EvalCase): Promise<void>
     ['initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'demo', version: '0' } }],
     ['tools/list', {}],
     ['tools/call', { name: 'impact', arguments: { request: showcase.request, top: 3 } }],
+    ['tools/call', { name: 'ask', arguments: { question } }],
   ];
   try {
     for (const [i, [method, params]] of exchanges.entries()) {
-      const shown = method === 'tools/call' ? { name: 'impact', arguments: { request: `${title} …`, top: 3 } } : params;
+      const isImpact = method === 'tools/call' && (params as { name: string }).name === 'impact';
+      const shown = isImpact ? { name: 'impact', arguments: { request: `${title} …`, top: 3 } } : params;
       console.log(`  ${good('→')} ${JSON.stringify({ jsonrpc: '2.0', id: i + 1, method, params: shown }).slice(0, 150)}`);
       server.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: i + 1, method, params })}\n`);
       if (method === 'initialize') server.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);

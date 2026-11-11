@@ -1,12 +1,13 @@
 // The part of the Model Context Protocol this server needs, by hand: JSON-RPC 2.0 messages, one
 // per line, with initialize, ping, tools/list and tools/call. The SDK would bring about 90
-// packages (HTTP servers, CORS, a JSON Schema validator) for a stdio server with one tool.
+// packages (HTTP servers, CORS, a JSON Schema validator) for a stdio server with two tools.
 
 export type Tool = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  call: (args: Record<string, unknown>) => string;
+  // A tool may wait, as `ask` does on a search and a model.
+  call: (args: Record<string, unknown>) => string | Promise<string>;
 };
 
 type Message = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
@@ -25,7 +26,7 @@ export class ToolError extends Error {}
 export function createHandler(
   server: { name: string; version: string },
   tools: Tool[],
-): (line: string) => Response | undefined {
+): (line: string) => Promise<Response | undefined> {
   const byName = new Map(tools.map((t) => [t.name, t]));
   const ok = (id: Response['id'], result: unknown): Response => ({ jsonrpc: '2.0', id, result });
   const fail = (id: Response['id'], code: number, message: string): Response => ({
@@ -34,7 +35,7 @@ export function createHandler(
     error: { code, message },
   });
 
-  return (line) => {
+  return async (line) => {
     let msg: Message;
     try {
       msg = JSON.parse(line) as Message;
@@ -62,7 +63,7 @@ export function createHandler(
         if (tool === undefined) return fail(id, -32602, `unknown tool ${String(msg.params?.name)}`);
         const args = (msg.params?.arguments ?? {}) as Record<string, unknown>;
         try {
-          return ok(id, { content: [{ type: 'text', text: tool.call(args) }] });
+          return ok(id, { content: [{ type: 'text', text: await tool.call(args) }] });
         } catch (e) {
           if (!(e instanceof ToolError)) throw e;
           return ok(id, { content: [{ type: 'text', text: e.message }], isError: true });

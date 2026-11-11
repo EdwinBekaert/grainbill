@@ -11,7 +11,8 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { ANSWER_MODEL, AnswerCache, answerAll, type Answered, answerKey, answerPrompt } from './answer.ts';
-import { type Corpus, readQuestions } from './build.ts';
+import { type Corpus, passagesOf, readQuestions } from './build.ts';
+import type { Passage } from './chunk.ts';
 import { askClaude, type Reply, type Run } from './claude.ts';
 import { EmbeddingCache } from './embed.ts';
 import { RerankCache } from './rerank.ts';
@@ -95,7 +96,7 @@ export async function judgeAll(
     if (!reply && opts.ask) {
       reply = await askClaude(prompt, { model: opts.model, system: JUDGE_SYSTEM, ...(opts.run ? { run: opts.run } : {}) });
       cache.set(key, reply);
-      console.log(`${q.id}: judged`);
+      console.error(`${q.id}: judged`);
     }
     if (!reply) {
       missing++;
@@ -108,8 +109,16 @@ export async function judgeAll(
 
 const pct = (n: number, of: number): string => (of === 0 ? '-' : `${((100 * n) / of).toFixed(1)}%`);
 
-export function report(judged: Judged[], model: string): string {
+// `all`, the corpus's passages, tells whether a source was among an answer's 5 passages.
+export function report(judged: Judged[], model: string, all: Passage[] = []): string {
   const answerable = judged.filter((j) => j.question.sources.length > 0);
+  const hit = (j: Judged) => {
+    const ids = new Set(j.question.sources.flatMap((s) => passagesOf(all, s.path, s.lines).map((p) => p.id)));
+    return j.passages.some((p) => ids.has(p.id));
+  };
+  const split = (js: Judged[]) =>
+    `${count(js, (v) => v.correct === 'yes')} of ${js.length} correct, ${count(js, (v) => v.correct === 'partly')} partly, ` +
+    `${count(js, (v) => v.correct === 'no')} wrong`;
   const unanswerable = judged.filter((j) => j.question.sources.length === 0);
   const kinds = [...new Set(answerable.map((j) => j.question.kind))];
   const count = (js: Judged[], f: (v: Verdict) => boolean) => js.filter((j) => f(j.verdict)).length;
@@ -130,6 +139,7 @@ export function report(judged: Judged[], model: string): string {
     row('not paraphrased', answerable.filter((j) => !j.question.paraphrased)),
     row('unanswerable', unanswerable),
     '',
+    `With a source among the 5 passages: ${split(answerable.filter(hit))}; without one: ${split(answerable.filter((j) => !hit(j)))}.`,
     `Amended questions answered with the rule that holds now: ${count(amended, (v) => v.current === 'yes')} of ${amended.length}.`,
     `Unanswerable questions refused, by the judge: ${count(unanswerable, (v) => v.refused === 'yes')} of ${unanswerable.length}; ` +
       `answerable ones refused: ${count(answerable, (v) => v.refused === 'yes')} of ${answerable.length}.`,
@@ -167,5 +177,5 @@ if (import.meta.main) {
   if (missing > 0) console.log(`${missing} questions have no cached answer; run npm run answer -- --claude first.`);
   const verdicts = await judgeAll(answers, new AnswerCache(values.out), { model: values.model, ask: values.claude });
   if (verdicts.missing > 0) console.log(`${verdicts.missing} answers are not judged yet; run with --claude to ask ${values.model}.\n`);
-  if (verdicts.judged.length > 0) console.log(report(verdicts.judged, values.model));
+  if (verdicts.judged.length > 0) console.log(report(verdicts.judged, values.model, corpus.passages));
 }
